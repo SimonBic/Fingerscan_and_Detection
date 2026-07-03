@@ -1,7 +1,7 @@
 from pathlib import Path
 import trimesh
 
-def load_whole_folder(folder_path: str) -> trimesh.Trimesh:
+def load_whole_folder(folder_path: str, bake_vertex_colors: bool = False) -> trimesh.Trimesh:
     if not Path(folder_path).is_dir():
         raise NotADirectoryError(f"Ordner nicht gefunden{folder}, bitte den Pfad uberpruefen")
     
@@ -40,9 +40,9 @@ def load_whole_folder(folder_path: str) -> trimesh.Trimesh:
         if color_of_hand_scan.material.image is None:
             raise ValueError("Es wurde keine Textur gefunden, obwohl eine .mtl file existiert.")
         else:
-            filled_handscan = color_of_hand_scan.to_color()
-            handscan_mesh.visual = filled_handscan
             print(f"Erfolgreich geladen: {len(handscan_mesh.vertices)} Vertices gefunden, {len(handscan_mesh.faces)} Faces gefunden.")
+            if bake_vertex_colors:
+                handscan_mesh.visual = color_of_hand_scan.to_color() 
             return handscan_mesh
 
         

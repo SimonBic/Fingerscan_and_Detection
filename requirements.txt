@@ -1,2 +1,3 @@
 trimesh
 pathlib
+pyglet<2
