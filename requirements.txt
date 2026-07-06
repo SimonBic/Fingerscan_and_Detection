@@ -1,3 +1,6 @@
 trimesh
 pathlib
-pyglet<2
+rtree
+pyglet
+json
+numpy
