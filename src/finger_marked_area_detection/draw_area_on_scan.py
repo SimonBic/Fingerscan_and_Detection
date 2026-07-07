@@ -51,14 +51,15 @@ class DrawCircleViewer(SceneViewer):
         self.is_drawing = False
         self.lines = []
         self.current_line = []  # 3D-Punkte, fuer die Live-Anzeige der Linie
+        
         self.uv_points = []    # zugehoerige UV-Koordinaten, fuer das Speichern
+        self.current_uv_points = []
 
         self._last_draw_time = 0
-        self._draw_interval = (1 / 5) #Nur alle 5tel Sekudnen wird atualisiert, sonst hängt ser Pc hinterher.
+        self._draw_interval = (1 / 5) #Nur alle 5tel Sekudnen wird aktualisiert, sonst hängt ser Pc hinterher.
 
-        # SceneViewer.__init__() oeffnet das Fenster und blockiert, bis
-        # es wieder geschlossen wird (wie schon beim Schnitt-Werkzeug)
         super().__init__(trimesh.Scene(mesh), **kwargs)
+        self.scene.camera.resolution = (self.width, self.height)
     
     @staticmethod
     def ray_hit_point_and_uv(mesh, origin, direction):
@@ -119,23 +120,24 @@ class DrawCircleViewer(SceneViewer):
             self._add_point(x, y)  # exakte Loslass-Position noch mit aufnehmen
             self.is_drawing = False
             self.lines.append(self.current_line)
+            self.uv_points.append(self.current_uv_points)
         self.current_line = []
+        self.current_uv_points = []
 
     def on_key_press(self, symbol, modifiers):
         if symbol == pyglet.window.key.F and modifiers & pyglet.window.key.MOD_CTRL:
             self._finish_drawing()
     
     def _add_point(self, x, y):
-        camera = self.scene.camera
-        camera.resolution = (self.width, self.height)
-        origin, direction = pixel_to_ray(camera, self.scene.camera_transform, x, y)
+        self.scene.camera.resolution = (self.width, self.height)
+        origin, direction = pixel_to_ray(self.scene.camera, self.scene.camera_transform, x, y)
 
         now = time.time()
 
         point, uv = self.ray_hit_point_and_uv(self.mesh, origin, direction)
         if point is not None:
             self.current_line.append(point)
-            self.uv_points.append(uv)
+            self.current_uv_points.append(uv)
 
         if now - self._last_draw_time >= self._draw_interval:
             self.dispatch_event("on_draw")
@@ -147,12 +149,13 @@ class DrawCircleViewer(SceneViewer):
         self.flip()
  
         print(f"\nLinie fertig gezeichnet: {len(self.current_line)} Punkte auf dem Mesh erfasst.")
- 
-        if len(self.current_line) < 3:
+    
+        num_points_drawn = sum(len(line) for line in self.lines)
+        if num_points_drawn < 3:
             print("Zu wenige Punkte auf dem Mesh getroffen, nichts zu speichern.")
             return
  
-        antwort = input("Diese Linie als neuen Scan speichern (OBJ+MTL)? (j/n): ").strip().lower()
+        antwort = input("Linien als neuen Scan speichern (OBJ+MTL)? (j/n): ").strip().lower()
         if antwort != "j":
             print("Nicht gespeichert.")
             return
@@ -196,43 +199,45 @@ class DrawCircleViewer(SceneViewer):
         print(f"Neuer Scan (OBJ+MTL+Textur) gespeichert unter: {save_path}")
  
     def _paint_line_on_texture(self, marked_mesh):
-        """Malt die gesammelten UV-Punkte als rote Kreise direkt in
-        eine Kopie des Textur-Bildes."""
         original_image = marked_mesh.visual.material.image
         painted_image = original_image.copy()
         draw = ImageDraw.Draw(painted_image)
         img_w, img_h = painted_image.size
  
         gemalt = 0
-        for uv in self.uv_points:
-            if uv is None:
-                continue
-            # U/V sind normiert (0 bis 1) - auf echte Bild-Pixel umrechnen.
-            # V zeigt in Textur-Koordinaten meist von unten nach oben,
-            # Bild-Pixel-Y aber von oben nach unten - deshalb (1 - v)
-            px = uv[0] * img_w
-            py = (1 - uv[1]) * img_h
- 
-            draw.ellipse(
-                [px - self.BRUSH_RADIUS_PX, py - self.BRUSH_RADIUS_PX,
-                 px + self.BRUSH_RADIUS_PX, py + self.BRUSH_RADIUS_PX],
-                fill=(0, 0, 255),
-            )
-            gemalt += 1
+
+        for uv_lines in self.uv_points:
+            for cur_uv in self.current_uv_points:
+                if cur_uv is None:
+                    continue
+                # U/V sind normiert (0 bis 1) - auf echte Bild-Pixel umrechnen.
+                # V zeigt in Textur-Koordinaten meist von unten nach oben,
+                # Bild-Pixel-Y aber von oben nach unten - deshalb (1 - v)
+                px = cur_uv[0] * img_w
+                py = (1 - cur_uv[1]) * img_h
+    
+                draw.ellipse(
+                    [px - self.BRUSH_RADIUS_PX, py - self.BRUSH_RADIUS_PX,
+                    px + self.BRUSH_RADIUS_PX, py + self.BRUSH_RADIUS_PX],
+                    fill=(0, 0, 255),
+                )
+                gemalt += 1
  
         marked_mesh.visual.material.image = painted_image
         print(f"{gemalt} Punkte in die Textur eingemalt (Original-Aufloesung bleibt erhalten).")
  
     def _paint_line_on_vertex_colors(self, marked_mesh):
-        """Fallback, falls das Mesh keine Textur hat: faerbt Vertices in
-        der Naehe der gezeichneten 3D-Punkte rot ein."""
         from scipy.spatial import cKDTree
  
         if isinstance(marked_mesh.visual, trimesh.visual.texture.TextureVisuals):
             marked_mesh.visual = marked_mesh.visual.to_color()
  
         tree = cKDTree(marked_mesh.vertices)
-        nearby_lists = tree.query_ball_point(self.current_line, r=1.5)
+        all_points = []
+        for line in self.lines:
+            all_points.extend(line)
+        all_points = np.array(all_points)
+        nearby_lists = tree.query_ball_point(all_points, r=1.5)
  
         marked_indices = set()
         for indices in nearby_lists:

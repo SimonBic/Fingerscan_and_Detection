@@ -12,29 +12,56 @@ from trimesh.viewer.windowed import SceneViewer
 
 
 def pixel_to_ray(camera, camera_transform, px, py):
-    ''' Wandelt Bildschirm-Pixelkoordinate in einen 3D-Sichtstrahl
-        (Ursprung + Richtung) im Weltkoordinatensystem um'''
+    """Wandelt Bildschirm-Pixelkoordinate in einen 3D-Sichtstrahl um"""
 
-    widht_of_cam, height_of_cam = camera.resolution
+    width_cam = int(camera.resolution[0])
+    height_cam = int(camera.resolution[1])
 
-    half_fov = np.radians(camera.fov) / 2.0 #Öffnungswinkel von Bildmitte bis Rand, von winkel zu Radianten
-    right_top = np.tan(half_fov) * (1 - 1.0 / np.array([widht_of_cam, height_of_cam])) #Berechnung obere Rechte Ecke, Multiplikator um Pixelmitte zu treffen
+    # NDC (normalisierte Geraetekoordinaten): -1 bis +1
+    x_ndc = (px / width_cam) * 2.0 - 1.0
+    y_ndc = (py / height_cam) * 2.0 - 1.0
 
-    x_cam = np.interp(px, [0, widht_of_cam - 1], [-right_top[0], right_top[0]])     #Umrechnung des Kamerapixels von numerischen Werten
-    y_cam = np.interp(py, [0, height_of_cam - 1], [-right_top[1], right_top[1]])    #in lineare Interpolation, also Element von [-right top, right top]
-    
-    #Annahme, z Richtung der Kamera = -1; Ebene ist immer genau -1 in der z Koordinatre entfernt
-    direction_cam = np.array([x_cam, y_cam, -1.0])      #Vektor = Ziel - Beginn = (x, y -1) - (0, 0, 0)
-    direction_cam /= np.linalg.norm(direction_cam)      #normieren
+    # camera.fov ist ein Array mit 2 Werten: [fov_x, fov_y] - getrennt
+    # behandeln, NICHT zusammen mit einem zusaetzlichen aspect-Faktor
+    # verrechnen (das FOV beruecksichtigt das Seitenverhaeltnis schon)
+    half_fov = np.radians(camera.fov) / 2.0   # Array mit 2 Werten
+    tan_half_fov = np.tan(half_fov)           # Array mit 2 Werten
 
-    #Ergibt Vektor, der x, y, z relativ zu mir selbst betrachtet.
+    x_cam = x_ndc * tan_half_fov[0]   # nur den X-Anteil nehmen
+    y_cam = y_ndc * tan_half_fov[1]   # nur den Y-Anteil nehmen
 
-    #camera_transform = 4 mal 4 Matrix, 3 mal 3 Block oben links isr rotation, rechte Spalte ist Änderung der Koordinaten, letzte zeile  = (0,0,0,1)
-    direction_world = camera_transform[:3, :3] @ direction_cam  #Matrixmultiplikation mit richtungsvektor von oben 
-    #ergibt Vektor mit Berücksichtigung der Rotationen davor
+    direction_cam = np.array([x_cam, y_cam, -1.0])
+    direction_cam /= np.linalg.norm(direction_cam)
 
-    origin_world = camera_transform[:3, 3] #wo startet der blickstrahl
+    direction_world = camera_transform[:3, :3] @ direction_cam
+    origin_world = camera_transform[:3, 3]
+
     return origin_world, direction_world
+
+# def pixel_to_ray(camera, camera_transform, px, py):
+#     ''' Wandelt Bildschirm-Pixelkoordinate in einen 3D-Sichtstrahl
+#         (Ursprung + Richtung) im Weltkoordinatensystem um'''
+
+#     widht_of_cam, height_of_cam = camera.resolution
+
+#     half_fov = np.radians(camera.fov) / 2.0 #Öffnungswinkel von Bildmitte bis Rand, von winkel zu Radianten
+#     right_top = np.tan(half_fov) * (1 - 1.0 / np.array([widht_of_cam, height_of_cam])) #Berechnung obere Rechte Ecke, Multiplikator um Pixelmitte zu treffen
+
+#     x_cam = np.interp(px, [0, widht_of_cam - 1], [-right_top[0], right_top[0]])     #Umrechnung des Kamerapixels von numerischen Werten
+#     y_cam = np.interp(py, [0, height_of_cam - 1], [-right_top[1], right_top[1]])    #in lineare Interpolation, also Element von [-right top, right top]
+    
+#     #Annahme, z Richtung der Kamera = -1; Ebene ist immer genau -1 in der z Koordinatre entfernt
+#     direction_cam = np.array([x_cam, y_cam, -1.0])      #Vektor = Ziel - Beginn = (x, y -1) - (0, 0, 0)
+#     direction_cam /= np.linalg.norm(direction_cam)      #normieren
+
+#     #Ergibt Vektor, der x, y, z relativ zu mir selbst betrachtet.
+
+#     #camera_transform = 4 mal 4 Matrix, 3 mal 3 Block oben links isr rotation, rechte Spalte ist Änderung der Koordinaten, letzte zeile  = (0,0,0,1)
+#     direction_world = camera_transform[:3, :3] @ direction_cam  #Matrixmultiplikation mit richtungsvektor von oben 
+#     #ergibt Vektor mit Berücksichtigung der Rotationen davor
+
+#     origin_world = camera_transform[:3, 3] #wo startet der blickstrahl
+#     return origin_world, direction_world
 
 
 def ray_mesh_hit(mesh, origin, direction):
