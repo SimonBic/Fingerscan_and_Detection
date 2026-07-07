@@ -33,7 +33,7 @@ def main():
         #Unfinished
         print("unfinished")
         my_area_drawer = draw_area_on_scan.DrawCircleViewer(load_scan.load_whole_folder(pfad), pfad)
-        my_area_drawer.draw_circle_on_mesh(load_scan.load_whole_folder(pfad), pfad)
+        my_area_drawer.draw_circle_on_mesh()
     
 
 

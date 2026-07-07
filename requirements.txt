@@ -4,3 +4,5 @@ rtree
 pyglet
 json
 numpy
+PIL
+time
