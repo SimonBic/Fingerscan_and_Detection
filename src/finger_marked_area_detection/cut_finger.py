@@ -17,18 +17,17 @@ def pixel_to_ray(camera, camera_transform, px, py):
     width_cam = int(camera.resolution[0])
     height_cam = int(camera.resolution[1])
 
-    # NDC (normalisierte Geraetekoordinaten): -1 bis +1
+    #normalisierte Geraetekoordinaten el.  -1 bis +1
     x_ndc = (px / width_cam) * 2.0 - 1.0
     y_ndc = (py / height_cam) * 2.0 - 1.0
 
-    # camera.fov ist ein Array mit 2 Werten: [fov_x, fov_y] - getrennt
-    # behandeln, NICHT zusammen mit einem zusaetzlichen aspect-Faktor
-    # verrechnen (das FOV beruecksichtigt das Seitenverhaeltnis schon)
-    half_fov = np.radians(camera.fov) / 2.0   # Array mit 2 Werten
-    tan_half_fov = np.tan(half_fov)           # Array mit 2 Werten
+    aspect = width_cam / height_cam
+    half_fov_y = np.radians(camera.fov[1]) / 2.0
+    tan_half_fov_y = np.tan(half_fov_y)
+    tan_half_fov_x = tan_half_fov_y * aspect
 
-    x_cam = x_ndc * tan_half_fov[0]   # nur den X-Anteil nehmen
-    y_cam = y_ndc * tan_half_fov[1]   # nur den Y-Anteil nehmen
+    x_cam = x_ndc * tan_half_fov_x
+    y_cam = y_ndc * tan_half_fov_y
 
     direction_cam = np.array([x_cam, y_cam, -1.0])
     direction_cam /= np.linalg.norm(direction_cam)
