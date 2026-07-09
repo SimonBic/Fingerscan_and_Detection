@@ -47,6 +47,7 @@ class DrawCircleViewer(SceneViewer):
  
     def __init__(self, mesh, original_folder, **kwargs):
         self.mesh = mesh
+        self.mesh.ray = RayMeshIntersector(self.mesh)   #Schnelleres Renderring des Schnittpunkts als der Standart von trimesh
         self.original_folder = Path(original_folder)
  
         self.is_drawing = False
@@ -101,7 +102,6 @@ class DrawCircleViewer(SceneViewer):
         uv = (bary[:, None] * tri_uv).sum(axis=0)
     
         return point, uv
-    # ---------- Maus-Events ----------
  
     def on_mouse_press(self, x, y, buttons, modifiers):
         if modifiers & pyglet.window.key.MOD_SHIFT:

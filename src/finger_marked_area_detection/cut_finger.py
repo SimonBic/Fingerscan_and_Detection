@@ -37,31 +37,6 @@ def pixel_to_ray(camera, camera_transform, px, py):
 
     return origin_world, direction_world
 
-# def pixel_to_ray(camera, camera_transform, px, py):
-#     ''' Wandelt Bildschirm-Pixelkoordinate in einen 3D-Sichtstrahl
-#         (Ursprung + Richtung) im Weltkoordinatensystem um'''
-
-#     widht_of_cam, height_of_cam = camera.resolution
-
-#     half_fov = np.radians(camera.fov) / 2.0 #Öffnungswinkel von Bildmitte bis Rand, von winkel zu Radianten
-#     right_top = np.tan(half_fov) * (1 - 1.0 / np.array([widht_of_cam, height_of_cam])) #Berechnung obere Rechte Ecke, Multiplikator um Pixelmitte zu treffen
-
-#     x_cam = np.interp(px, [0, widht_of_cam - 1], [-right_top[0], right_top[0]])     #Umrechnung des Kamerapixels von numerischen Werten
-#     y_cam = np.interp(py, [0, height_of_cam - 1], [-right_top[1], right_top[1]])    #in lineare Interpolation, also Element von [-right top, right top]
-    
-#     #Annahme, z Richtung der Kamera = -1; Ebene ist immer genau -1 in der z Koordinatre entfernt
-#     direction_cam = np.array([x_cam, y_cam, -1.0])      #Vektor = Ziel - Beginn = (x, y -1) - (0, 0, 0)
-#     direction_cam /= np.linalg.norm(direction_cam)      #normieren
-
-#     #Ergibt Vektor, der x, y, z relativ zu mir selbst betrachtet.
-
-#     #camera_transform = 4 mal 4 Matrix, 3 mal 3 Block oben links isr rotation, rechte Spalte ist Änderung der Koordinaten, letzte zeile  = (0,0,0,1)
-#     direction_world = camera_transform[:3, :3] @ direction_cam  #Matrixmultiplikation mit richtungsvektor von oben 
-#     #ergibt Vektor mit Berücksichtigung der Rotationen davor
-
-#     origin_world = camera_transform[:3, 3] #wo startet der blickstrahl
-#     return origin_world, direction_world
-
 
 def ray_mesh_hit(mesh, origin, direction):
     """Findet den naehesten Schnittpunkt eines Rays mit dem Mesh (Hände sind ja 3-Dimensional)"""
@@ -106,7 +81,36 @@ class CutSceneViewer(SceneViewer):
         self.mesh = mesh
         self.result_mesh = None
         self._drag_start_px = None
+        self._drag_current_px = None
+        self._preview_plane = None
+
         super().__init__(trimesh.Scene(mesh), **kwargs)
+
+    def _compute_preview_plane(self):
+        camera = self.scene.camera
+        camera.resolution = (self.width, self.height)
+        cam_transform = self.scene.camera_transform
+
+        o0, d0 = pixel_to_ray(camera, cam_transform, *self._drag_start_px)
+        o1, d1 = pixel_to_ray(camera, cam_transform, *self._drag_current_px)
+
+        p0 = ray_mesh_hit(self.mesh, o0, d0)
+        p1 = ray_mesh_hit(self.mesh, o1, d1)
+
+        depth = 2.0
+
+        if p0 is None:
+            p0 = o0 + d0 * depth
+
+        if p1 is None:
+            p1 = o1 + d1 * depth
+
+        view_dir = cam_transform[:3, :3] @ np.array([0, 0, -1])
+
+        try:
+            return plane_from_line_and_view(p0, p1, view_dir)
+        except:
+            return None
 
     def on_mouse_press(self, x, y, buttons, modifiers):
         if modifiers & pyglet.window.key.MOD_SHIFT:
@@ -115,17 +119,23 @@ class CutSceneViewer(SceneViewer):
             super().on_mouse_press(x, y, buttons, modifiers)
 
     def on_mouse_drag(self, x, y, dx, dy, buttons, modifiers):
-        if self._drag_start_px is None:
+        self._preview_plane = None
+        if self._drag_start_px is not None:
+            self._drag_current_px = (x, y)
+            self._preview_plane = self._compute_preview_plane()
+        else:
             super().on_mouse_drag(x, y, dx, dy, buttons, modifiers)
         # waehrend SHIFT-Drag: Kamera nicht mitdrehen, einfach nichts tun
 
     def on_mouse_release(self, x, y, button, modifiers):
-        # SceneViewer definiert selbst kein on_mouse_release, daher hier
-        # kein super()-Aufruf noetig (es gibt nichts zu delegieren).
         if self._drag_start_px is not None:
             start_px = self._drag_start_px
             end_px = (x, y)
+
             self._drag_start_px = None
+            self._drag_current_px = None   
+            self._preview_plane = None
+
             self._try_cut(start_px, end_px)
 
     def _try_cut(self, start_px, end_px):
@@ -139,9 +149,13 @@ class CutSceneViewer(SceneViewer):
         p0 = ray_mesh_hit(self.mesh, o0, d0)
         p1 = ray_mesh_hit(self.mesh, o1, d1)
 
-        if p0 is None or p1 is None:
-            print("Linie muss auf dem Mesh beginnen UND enden - bitte erneut ziehen.")
-            return
+        depth = 2.0
+
+        if p0 is None:
+            p0 = o0 + d0 * depth
+
+        if p1 is None:
+            p1 = o1 + d1 * depth
 
         view_dir = cam_transform[:3, :3] @ np.array([0.0, 0.0, -1.0])
 
@@ -167,6 +181,62 @@ class CutSceneViewer(SceneViewer):
         print(f"Geschnitten: {len(self.result_mesh.vertices)} Vertices, "
               f"{len(self.result_mesh.faces)} Faces uebrig. Fenster schliesst sich.")
         self.close()
+    
+    def on_draw(self):
+        super().on_draw()
+
+       
+        if self._preview_plane is None:
+            self.mesh.visual.vertex_colors = None
+
+        if self._preview_plane is not None:
+            origin, normal = self._preview_plane
+
+            signed = np.dot(self.mesh.vertices - origin, normal)
+
+            colors = np.zeros((len(self.mesh.vertices), 4), dtype=np.uint8)
+
+            colors[signed > 0] = [255, 0, 0, 80]
+            colors[signed <= 0] = [0, 0, 255, 80]
+
+            self.mesh.visual.vertex_colors = colors
+
+        if self._drag_start_px is None or self._drag_current_px is None:
+            return
+
+        import pyglet.gl as gl
+
+        x0, y0 = self._drag_start_px
+        x1, y1 = self._drag_current_px
+
+        # in OpenGL Screen Space zeichnen
+        gl.glDisable(gl.GL_DEPTH_TEST)
+
+        gl.glMatrixMode(gl.GL_PROJECTION)
+        gl.glPushMatrix()
+        gl.glLoadIdentity()
+        gl.glOrtho(0, self.width, 0, self.height, -1, 1)
+
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+        gl.glPushMatrix()
+        gl.glLoadIdentity()
+
+        gl.glLineWidth(2)
+        gl.glColor3f(1.0, 0.0, 0.0)
+
+        pyglet.graphics.draw(2, gl.GL_LINES,
+            ('v2f', (x0, y0, x1, y1))
+        )
+
+        # restore state
+        gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_PROJECTION)
+        gl.glPopMatrix()
+        gl.glMatrixMode(gl.GL_MODELVIEW)
+
+        gl.glEnable(gl.GL_DEPTH_TEST)
+
+        gl.glColor3f(1.0, 1.0, 1.0)
 
 
 def interactive_cut(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
@@ -174,10 +244,6 @@ def interactive_cut(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     print("Zum Schneiden: SHIFT gedrueckt halten, auf dem Mesh klicken,")
     print("Linie ziehen, loslassen. Dann im Terminal Seite waehlen (a/b).\n")
 
-    # SceneViewer.__init__() ruft intern bereits pyglet.app.run() auf und
-    # kehrt erst zurueck, wenn das Fenster geschlossen wird - kein
-    # zusaetzlicher pyglet.app.run()-Aufruf noetig (fuehrte sonst zu einer
-    # haengenden zweiten Event-Loop nach dem Schliessen).
     viewer = CutSceneViewer(mesh)
 
     if viewer.result_mesh is not None:
@@ -192,6 +258,6 @@ def cut_finger_main(mesh):
     while input_user == "y":
         cut = interactive_cut(mesh)
         mesh = cut
-        input_user = input("nochmal schneiden?")
+        input_user = input("nochmal schneiden? (y / n)")
         
     cut.show()
