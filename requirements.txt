@@ -6,3 +6,4 @@ json
 numpy
 PIL
 time
+pyvista
