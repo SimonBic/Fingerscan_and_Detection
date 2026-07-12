@@ -3,6 +3,7 @@ from pathlib import Path
 import trimesh
 import numpy as np
 import load_scan
+import vtk
 
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
@@ -49,6 +50,7 @@ def load_scan_as_pyvista(obj_pfad: str) -> p_v.PolyData:
 
     return pv_mesh, texture
 
+
 def make_surface_on_hand(points, hand_mesh):
 
     # geschlossene Kontur
@@ -67,12 +69,60 @@ def make_surface_on_hand(points, hand_mesh):
 
     return surface
 
+def get_hand_region(hand_mesh, circle_points):
+
+    circle = np.vstack([
+        circle_points,
+        circle_points[0]
+    ])
+
+    vtk_points = vtk.vtkPoints()
+
+    for point in circle:
+        vtk_points.InsertNextPoint(point)
+
+    selector = vtk.vtkSelectPolyData()
+
+    selector.SetInputData(hand_mesh)
+    selector.SetLoop(vtk_points)
+    selector.GenerateSelectionScalarsOn()
+    selector.Update()
+
+    result = p_v.wrap(selector.GetOutput())
+
+    return result["Selection"] < 0
+
+def extract_faces_of_hand(hand_mesh, mask):
+
+    faces = hand_mesh.faces.reshape(-1,4)
+
+    neue_faces = []
+
+    for face in faces:
+
+        ids = face[1:]
+
+        # Mindestens eine Ecke im vom Polygon in der Selection, wird dazu gepackt.
+        if np.any(mask[ids]):
+            neue_faces.append(ids)
+
+    faces_array = np.array(neue_faces)
+
+    vtk_faces = np.hstack([
+        np.full((len(faces_array),1),3),
+        faces_array
+    ])
+
+    return p_v.PolyData(
+        hand_mesh.points,
+        vtk_faces
+    )
 
 def draw_circle_on_scan(mesh):
     
     my_p_v_plotter = p_v.Plotter()
 
-    hand_mesh = mesh[0][0]
+    hand_mesh = p_v.merge([teil for teil, textur in mesh])
 
     def line_done(scan):
         print(f"Fertig gemalt, du hast gesamt {scan.n_points} Punkte.")
@@ -102,10 +152,13 @@ def draw_circle_on_scan(mesh):
             )
 
             # Fläche erzeugen
-            gemalte_flaeche = make_surface_on_hand(scan.points, hand_mesh)
+            mask = get_hand_region(hand_mesh,scan.points)
 
+            flaeche = extract_faces_of_hand(hand_mesh, mask)
+            #flaeche.save("markierung.obj")
+            
             my_p_v_plotter.add_mesh(
-                gemalte_flaeche,
+                flaeche,
                 color="red",
                 opacity=1
             )
