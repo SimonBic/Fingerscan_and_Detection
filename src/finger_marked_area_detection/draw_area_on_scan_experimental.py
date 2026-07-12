@@ -49,12 +49,68 @@ def load_scan_as_pyvista(obj_pfad: str) -> p_v.PolyData:
 
     return pv_mesh, texture
 
+def make_surface_on_hand(points, hand_mesh):
+
+    # geschlossene Kontur
+    contour = np.vstack([points, points[0]])
+
+    contour_mesh = p_v.PolyData(contour)
+
+    # Fläche innerhalb der Kontur erzeugen
+    surface = contour_mesh.delaunay_2d()
+
+    # Punkte auf die Handoberfläche zurückprojizieren
+    new_points = np.array([
+    hand_mesh.points[hand_mesh.find_closest_point(p)] for p in surface.points])
+
+    surface.points = new_points
+
+    return surface
+
+
 def draw_circle_on_scan(mesh):
     
     my_p_v_plotter = p_v.Plotter()
 
+    hand_mesh = mesh[0][0]
+
     def line_done(scan):
-        print(f"Fertig gemalt, du hast {scan.n_points} gezeichnet.")
+        print(f"Fertig gemalt, du hast gesamt {scan.n_points} Punkte.")
+
+        punkte = scan.points
+
+        if len(punkte) < 3:
+            return
+
+        # Abstand zwischen letztem und erstem Punkt
+        abstand = np.linalg.norm(punkte[0] - punkte[-1])
+
+        # Schließen, wenn nah genug am Anfang geklickt wurde
+        if abstand < 5:  # Wert an deine Scan-Größe anpassen
+            geschlossene_punkte = np.vstack([punkte, punkte[0]])
+
+            linien = np.arange(len(geschlossene_punkte))
+
+            faces = np.hstack([
+                [len(linien)],
+                linien
+            ])
+
+            kontur = p_v.PolyData(
+                geschlossene_punkte,
+                faces=faces
+            )
+
+            # Fläche erzeugen
+            gemalte_flaeche = make_surface_on_hand(scan.points, hand_mesh)
+
+            my_p_v_plotter.add_mesh(
+                gemalte_flaeche,
+                color="red",
+                opacity=1
+            )
+
+            print("Kreis geschlossen!")
 
     for teil, textur in mesh:
         my_p_v_plotter.add_mesh(teil, texture = textur, smooth_shading = True)
