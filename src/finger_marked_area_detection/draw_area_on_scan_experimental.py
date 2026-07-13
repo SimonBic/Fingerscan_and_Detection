@@ -4,6 +4,15 @@ import trimesh
 import numpy as np
 import load_scan
 import vtk
+from PIL import Image 
+
+
+HEATMAPFARBEN = {
+    "rot" : (220, 20, 20),
+    "orange" : (255, 140, 0),
+    "gelb" : (240, 220, 0),
+    "grün" : (30, 180, 30),
+}
 
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
@@ -35,20 +44,45 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
     return ergebnis
  
 
-def load_scan_as_pyvista(obj_pfad: str) -> p_v.PolyData:
-    #Wird grade nicht verwendet, pyVista ist ein wenig buggy beim Laden mit jpgs
+def p_v_flaeche_zu_farbigem_obj(flaeche, farbe_rgb, save_path):
+    # VTK-Face-Format [3, i0,i1,i2, 3, i0,i1,i2, ...] -> (n,3) fuer trimesh
+    faces = flaeche.faces.reshape(-1, 4)[:, 1:]
+    tmesh = trimesh.Trimesh(vertices=flaeche.points, faces=faces, process=False)
+    tmesh.remove_unreferenced_vertices() 
+
+    farb_bild = Image.new("RGB", (64, 64), farbe_rgb)
+ 
+    uv = np.full((len(tmesh.vertices), 2), 0.5)
+ 
+    tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=farb_bild)
+    tmesh.export(str(save_path))
+
+
+def save_drawn_area(area, original_folder, farbenname):
+    if farbenname not in HEATMAPFARBEN:
+        raise ValueError(f"Bitte korrekte Heatmapfarbe wählen: (rot, orange, gelb, grün)") 
+
+    farbe = HEATMAPFARBEN[farbenname]
+    #area.point_data["RGB"] = farbe
+
+    output_ordner = original_folder.parent / "Markierungen"
+
+    output_ordner.mkdir(exist_ok = True)
+
+    save_name = original_folder.name
+    save_path = output_ordner / (save_name + "_marked.obj")
+
+    zaehler = 1
+    while save_path.exists():
+        save_path = output_ordner / f"markierung_{zaehler}.obj"
+        zaehler += 1
+
+    p_v_flaeche_zu_farbigem_obj(area, farbe, save_path)
     
-    tmesh = load_scan.load_whole_folder(obj_pfad.parent)
+    print(f"Erfolgreich gespeichert unter dem Pfad: {save_path}")
+    return
 
-    if isinstance(tmesh, trimesh.Scene):
-        tmesh = trimesh.util.concatenate(tmesh.dump())
-    
-    pv_mesh = p_v.wrap(tmesh, )
 
-    if hasattr(tmesh.visual, "uv") and tmesh.visual.material.image is not None:
-        texture = p_v.from_trimesh(tmesh.visual.material.image)
-
-    return pv_mesh, texture
 
 
 def make_surface_on_hand(points, hand_mesh):
@@ -119,7 +153,8 @@ def extract_faces_of_hand(hand_mesh, mask):
     )
 
 def draw_circle_on_scan(mesh):
-    
+    drawn_flaeche = {"flaeche": None}
+
     my_p_v_plotter = p_v.Plotter()
 
     hand_mesh = p_v.merge([teil for teil, textur in mesh])
@@ -146,16 +181,11 @@ def draw_circle_on_scan(mesh):
                 linien
             ])
 
-            kontur = p_v.PolyData(
-                geschlossene_punkte,
-                faces=faces
-            )
-
             # Fläche erzeugen
             mask = get_hand_region(hand_mesh,scan.points)
 
             flaeche = extract_faces_of_hand(hand_mesh, mask)
-            #flaeche.save("markierung.obj")
+            drawn_flaeche["flaeche"] = flaeche
             
             my_p_v_plotter.add_mesh(
                 flaeche,
@@ -175,6 +205,8 @@ def draw_circle_on_scan(mesh):
         show_path = True)
 
     my_p_v_plotter.show()
+    
+    return drawn_flaeche["flaeche"]
 
 
 path_to_directory = Path(input("Pfad: "))
@@ -182,4 +214,11 @@ obj_files = list(path_to_directory.glob("*.obj"))
 
 texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-draw_circle_on_scan(texture_teile)
+drawn_flaeche = None
+drawn_flaeche = draw_circle_on_scan(texture_teile)
+
+if drawn_flaeche is not None:
+    speichern_frage = input("Markierung speichern? (y / n)")
+    farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
+    if speichern_frage == "y":
+        save_drawn_area(drawn_flaeche, path_to_directory, farben_frage)
