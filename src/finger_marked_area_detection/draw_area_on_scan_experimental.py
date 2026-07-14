@@ -14,6 +14,16 @@ HEATMAPFARBEN = {
     "grün" : (30, 180, 30),
 }
 
+LANDMARK_NAMEN = {
+    "1" : "linke_rille",
+    "2" : "fingerspitze",
+    "3" : "rechte_rille"
+}
+
+LANDMARK_FARBE = (30, 30, 220) #blau
+LANDMARK_RADIUS = 2
+
+
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
  
@@ -44,7 +54,7 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
     return ergebnis
  
 
-def p_v_flaeche_zu_farbigem_obj(flaeche, farbe_rgb, save_path):
+def p_v_flaeche_zu_farbigem_obj(flaeche, farbe_rgb, landmarken, save_path):
     # VTK-Face-Format [3, i0,i1,i2, 3, i0,i1,i2, ...] -> (n,3) fuer trimesh
     faces = flaeche.faces.reshape(-1, 4)[:, 1:]
     tmesh = trimesh.Trimesh(vertices=flaeche.points, faces=faces, process=False)
@@ -55,15 +65,20 @@ def p_v_flaeche_zu_farbigem_obj(flaeche, farbe_rgb, save_path):
     uv = np.full((len(tmesh.vertices), 2), 0.5)
  
     tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=farb_bild)
-    tmesh.export(str(save_path))
+
+    geometrien = {"markierung": tmesh}
+    geometrien.update(landmarken_als_kugeln(landmarken))   
+
+    scene = trimesh.Scene(geometrien)                       
+    scene.export(str(save_path))
 
 
-def save_drawn_area(area, original_folder, farbenname):
+
+def save_drawn_area(area, original_folder, farbenname, landmarken):
     if farbenname not in HEATMAPFARBEN:
         raise ValueError(f"Bitte korrekte Heatmapfarbe wählen: (rot, orange, gelb, grün)") 
 
     farbe = HEATMAPFARBEN[farbenname]
-    #area.point_data["RGB"] = farbe
 
     output_ordner = original_folder.parent / "Markierungen"
 
@@ -74,34 +89,79 @@ def save_drawn_area(area, original_folder, farbenname):
 
     zaehler = 1
     while save_path.exists():
-        save_path = output_ordner / f"markierung_{zaehler}.obj"
+        save_path = output_ordner / f"{save_name}_marked_{zaehler}.obj"
         zaehler += 1
 
-    p_v_flaeche_zu_farbigem_obj(area, farbe, save_path)
+    p_v_flaeche_zu_farbigem_obj(area, farbe, landmarken, save_path)
     
     print(f"Erfolgreich gespeichert unter dem Pfad: {save_path}")
     return
 
 
+def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starten):
+    # Registriert die Tasten 1/2/3 fuer Landmarken-Picking auf dem
+    # uebergebenen Plotter. 'pfad_zeichnen_neu_starten' ist eine
+    # Funktion ohne Argumente, die enable_path_picking() erneut
+    # aufruft (um nach dem Landmark-Setzen wiederr ins normale
+    # Zeichnen zurueckzuschalten).
+ 
+    # Gibt ein dict {name: 3d_punkt oder None} zurueck, das waehrend
+    # der Sitzung befuellt wird.
+
+    landmarken = {name: None for name in LANDMARK_NAMEN.values()} #Erstmal das leere dict aufstzen
+ 
+    def landmark_setzen(name):
+        def callback(point, picker):
+            landmarken[name] = np.array(point)
+            print(f"Landmark '{name}' gesetzt: {point.round(1)}")
+ 
+            # nur EIN Klick fuer diesen Landmark - danach Picking
+            # wieder deaktivieren und zurueck zum normalen Zeichnen
+            plotter.disable_picking()
+            pfad_zeichnen_neu_starten()
+ 
+        return callback
+ 
+    def taste_gedrueckt(name):
+        def taste_callback():
+            print(f"Landmark-Modus: naechster Linksklick setzt '{name}'")
+            plotter.disable_picking()  # Pfad-Zeichnen kurz pausieren
+            plotter.enable_point_picking(
+                callback=landmark_setzen(name),
+                left_clicking=True,
+                use_picker=True,
+                show_message=False,
+                show_point=True,
+                point_size=12,
+                color="blue",
+            )
+        return taste_callback
+ 
+    for taste, name in LANDMARK_NAMEN.items():
+        plotter.add_key_event(taste, taste_gedrueckt(name))
+ 
+    return landmarken
 
 
-def make_surface_on_hand(points, hand_mesh):
+def landmarken_als_kugeln(landmarken: dict) -> dict:
+    """Baut fuer jeden gesetzten Landmark eine kleine, einheitlich
+    gefaerbte Kugel-Geometrie (trimesh), fuer den gemeinsamen Export
+    mit der Markierungs-Flaeche."""
+    bild = Image.new("RGB", (8, 8), LANDMARK_FARBE)
+ 
+    kugeln = {}
+    for name, position in landmarken.items():
+        if position is None:
+            continue
+        kugel = trimesh.creation.icosphere(radius=LANDMARK_RADIUS, subdivisions=1)
+        kugel.apply_translation(position)
+        kugel.visual = trimesh.visual.texture.TextureVisuals(
+            uv=np.full((len(kugel.vertices), 2), 0.5), image=bild
+        )
+        kugeln[f"landmark_{name}"] = kugel
+ 
+    return kugeln
 
-    # geschlossene Kontur
-    contour = np.vstack([points, points[0]])
-
-    contour_mesh = p_v.PolyData(contour)
-
-    # Fläche innerhalb der Kontur erzeugen
-    surface = contour_mesh.delaunay_2d()
-
-    # Punkte auf die Handoberfläche zurückprojizieren
-    new_points = np.array([
-    hand_mesh.points[hand_mesh.find_closest_point(p)] for p in surface.points])
-
-    surface.points = new_points
-
-    return surface
 
 def get_hand_region(hand_mesh, circle_points):
 
@@ -167,46 +227,41 @@ def draw_circle_on_scan(mesh):
         if len(punkte) < 3:
             return
 
-        # Abstand zwischen letztem und erstem Punkt
         abstand = np.linalg.norm(punkte[0] - punkte[-1])
 
-        # Schließen, wenn nah genug am Anfang geklickt wurde
-        if abstand < 5:  # Wert an deine Scan-Größe anpassen
+        if abstand < 5:
             geschlossene_punkte = np.vstack([punkte, punkte[0]])
-
             linien = np.arange(len(geschlossene_punkte))
+            faces = np.hstack([[len(linien)], linien])
 
-            faces = np.hstack([
-                [len(linien)],
-                linien
-            ])
-
-            # Fläche erzeugen
-            mask = get_hand_region(hand_mesh,scan.points)
-
+            mask = get_hand_region(hand_mesh, scan.points)
             flaeche = extract_faces_of_hand(hand_mesh, mask)
             drawn_flaeche["flaeche"] = flaeche
-            
-            my_p_v_plotter.add_mesh(
-                flaeche,
-                color="red",
-                opacity=1
-            )
 
+            my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
             print("Kreis geschlossen!")
 
-    for teil, textur in mesh:
-        my_p_v_plotter.add_mesh(teil, texture = textur, smooth_shading = True)
+    
+    def path_picking_starten():
+        my_p_v_plotter.enable_path_picking(
+            callback=line_done,
+            color="blue",
+            line_width=5,
+            show_path=True)
 
-    my_p_v_plotter.enable_path_picking(
-        callback = line_done,
-        color = "blue",
-        line_width = 5,
-        show_path = True)
+    for teil, textur in mesh:
+        my_p_v_plotter.add_mesh(teil, texture=textur, smooth_shading=True)
+
+    # NEU: Landmarken-Picking einrichten (Tasten 1/2/3)
+    landmarken = landmarken_picking_einrichten(my_p_v_plotter, path_picking_starten)
+
+    path_picking_starten()
 
     my_p_v_plotter.show()
+
+    return drawn_flaeche["flaeche"], landmarken
+
     
-    return drawn_flaeche["flaeche"]
 
 
 path_to_directory = Path(input("Pfad: "))
@@ -214,11 +269,10 @@ obj_files = list(path_to_directory.glob("*.obj"))
 
 texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-drawn_flaeche = None
-drawn_flaeche = draw_circle_on_scan(texture_teile)
+drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile)
 
 if drawn_flaeche is not None:
     speichern_frage = input("Markierung speichern? (y / n)")
     farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
     if speichern_frage == "y":
-        save_drawn_area(drawn_flaeche, path_to_directory, farben_frage)
+        save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
