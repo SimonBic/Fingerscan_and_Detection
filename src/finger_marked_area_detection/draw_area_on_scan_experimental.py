@@ -5,7 +5,7 @@ import numpy as np
 import load_scan
 import vtk
 from PIL import Image 
-
+import heatmap
 
 HEATMAPFARBEN = {
     "rot" : (220, 20, 20),
@@ -95,7 +95,8 @@ def save_drawn_area(area, original_folder, farbenname, landmarken):
     p_v_flaeche_zu_farbigem_obj(area, farbe, landmarken, save_path)
     
     print(f"Erfolgreich gespeichert unter dem Pfad: {save_path}")
-    return
+
+    return save_path.parent
 
 
 def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starten):
@@ -275,4 +276,7 @@ if drawn_flaeche is not None:
     speichern_frage = input("Markierung speichern? (y / n)")
     farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
     if speichern_frage == "y":
-        save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
+        path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
+    # heatmap_frage = input("zu 2D transformieren? (y / n)")
+    # if heatmap_frage == "y":
+    #     heatmap2D_to_3D(drawn_flaeche, landmarken, path_marked_area)
