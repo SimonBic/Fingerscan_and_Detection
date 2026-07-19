@@ -2,7 +2,7 @@ import pyvista as p_v
 from pathlib import Path
 import trimesh
 import numpy as np
-import load_scan
+#import finger_marked_area_detection.prototyp.load_scan as load_scan
 import vtk
 from PIL import Image 
 import heatmap

@@ -1,7 +1,7 @@
-import load_scan
-import cut_finger
-from cut_finger import cut_finger_main
-import draw_area_on_scan
+import finger_marked_area_detection.prototyp.load_scan as load_scan
+import finger_marked_area_detection.prototyp.cut_finger as cut_finger
+from finger_marked_area_detection.prototyp.cut_finger import cut_finger_main
+import finger_marked_area_detection.prototyp.draw_area_on_scan as draw_area_on_scan
 
 
 def show_scan(path):

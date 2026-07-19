@@ -30,7 +30,7 @@ from PIL import ImageDraw
 from trimesh.viewer.windowed import SceneViewer
 from trimesh.ray.ray_pyembree import RayMeshIntersector #Zur Verbesserung des Speeds
  
-from cut_finger import pixel_to_ray
+from finger_marked_area_detection.prototyp.cut_finger import pixel_to_ray
   
  
 class DrawCircleViewer(SceneViewer):
