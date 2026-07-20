@@ -2,6 +2,7 @@ import pyvista as p_v
 import numpy as np
 from pathlib import Path
 import trimesh
+from scipy.spatial import cKDTree
 
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
@@ -11,6 +12,7 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
     else:
         teile = [geladen]
  
+    count_vertices = 0
     ergebnis = []
     for tmesh in teile:
         if tmesh.visual.uv is None:
@@ -20,7 +22,8 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
         faces_vtk = np.hstack(
             [np.full((len(tmesh.faces), 1), 3), tmesh.faces]
         ).astype(np.int64)
- 
+
+        count_vertices += len(tmesh.vertices)
         pv_mesh = p_v.PolyData(tmesh.vertices, faces_vtk)
         pv_mesh.active_texture_coordinates = tmesh.visual.uv
         pv_mesh = pv_mesh.compute_normals(point_normals=True, auto_orient_normals=True)
@@ -30,82 +33,9 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
  
         ergebnis.append((pv_mesh, tex))
  
+    print(f"Erfolgreich geladen, {count_vertices} Vertices gesamt.")
     return ergebnis
  
-
-def extract_ungefaehr_finger(mesh, seed_point, max_geodesic_dist=40):
-    # nächster Vertex zum Klick
-    seed_id = mesh.find_closest_point(seed_point)
-
-    # Geodätische Distanz (entlang Oberfläche)
-    dists = mesh.compute_geodesic_distance(seed_id)
-
-    # Finger grob isolieren
-    mask = dists < max_geodesic_dist
-
-    return mask
-
-def find_cut_position(mesh, mask, seed_point):
-    points = mesh.points[mask]
-
-    # PCA → Hauptachse des Fingers
-    mean = points.mean(axis=0)
-    centered = points - mean
-
-    U, S, Vt = np.linalg.svd(centered)
-    axis = Vt[0]  # Finger-Richtung
-
-    # Projektion aller Punkte auf Achse
-    t = np.dot(points - mean, axis)
-
-    # entlang Achse samplen
-    bins = np.linspace(t.min(), t.max(), 50)
-
-    areas = []
-
-    for i in range(len(bins)-1):
-        slice_mask = (t >= bins[i]) & (t < bins[i+1])
-        slice_pts = points[slice_mask]
-
-        if len(slice_pts) < 10:
-            areas.append(np.inf)
-            continue
-
-        # Fläche approximieren (Convex Hull)
-        from scipy.spatial import ConvexHull
-        try:
-            hull = ConvexHull(slice_pts[:, :2])
-            areas.append(hull.area)
-        except:
-            areas.append(np.inf)
-
-    cut_idx = np.argmin(areas)
-    cut_value = (bins[cut_idx] + bins[cut_idx+1]) / 2
-
-    return axis, mean, cut_value
-
-def cut_finger(mesh, axis, origin, cut_value):
-    # Punkt auf Schnittebene
-    plane_origin = origin + axis * cut_value
-
-    # Ebene
-    clipped = mesh.clip(
-        origin=plane_origin,
-        normal=axis,
-        invert=False  # je nach Richtung evtl. True
-    )
-
-    return clipped
-
-def extract_finger(mesh, seed_point):
-    #entrpciht der main Funktion, bzw die ganze pipelien
-    mask = extract_ungefaehr_finger(mesh, seed_point)
-
-    axis, origin, cut_value = find_cut_position(mesh, mask, seed_point)
-
-    finger = cut_finger(mesh, axis, origin, cut_value)
-
-    return finger
 
 def pick_finger_point(plotter, mesh):
     punkte = []
@@ -113,7 +43,7 @@ def pick_finger_point(plotter, mesh):
 
     def callback(point, picker):
         punkte.append(np.array(point))
-        print(f"Punkt {len(punkte)} gewaehlt bei: {point}")
+        print(f"Punkt {len(punkte)} gewählt bei: {point}")
 
         if len(punkte) < 2:
             print("Bitte jetzt den Fingernagel des Nachbar-Fingers anklicken")
@@ -134,60 +64,99 @@ def pick_finger_point(plotter, mesh):
     return punkte[0], punkte[1]
 
 
-def rotationsmatrix_zu_z_achse(richtung: np.ndarray) -> np.ndarray:
-    # Baut eine Rotationsmatrix, die 'richtung' exakt auf die
-    # Welt-Z-Achse [0,0,1] dreht (Rodrigues-Rotationsformel).
-
-    #normalisieren
-    richtung = richtung / np.linalg.norm(richtung)
-    ziel = np.array([0, 0, 1.0])
+def rotationsmatrix(seed: np.ndarray, second_finger: np.ndarray, centroid: np.ndarray) -> np.ndarray:
     
-
-    rotationsachse = np.cross(richtung, ziel)
-    sin_winkel = np.linalg.norm(rotationsachse)
-    cos_winkel = np.dot(richtung, ziel)
-    
-    #Fehlerbehandlung, falls ziel und richtung fast gleich sind bzw paralell
-    if sin_winkel < 1e-8:
-        if cos_winkel > 0:
-            #falls es schon passt
-            return np.eye(3)
-        #falls basically falschrum, dann ist die Rotationsachse ja wurscht
-        beliebige_achse = np.array([1.0, 0, 0]) if abs(richtung[0]) < 0.9 else np.array([0, 1.0, 0])
-        achse = np.cross(richtung, beliebige_achse)
-        achse /= np.linalg.norm(achse)
-        K = np.array([[0, -achse[2], achse[1]], [achse[2], 0, -achse[0]], [-achse[1], achse[0], 0]])
-        return np.eye(3) + 2 * K @ K  # 180-Grad-Rotation
+    v = second_finger - seed
+    v_hat = v / np.linalg.norm(v)
  
-    #normalfall: normieren
-    achse = rotationsachse / sin_winkel
-    #Rodrigues Formel:
-    K = np.array([[0, -achse[2], achse[1]], [achse[2], 0, -achse[0]], [-achse[1], achse[0], 0]])
-    return np.eye(3) + K * sin_winkel + K @ K * (1 - cos_winkel)
-
-def richte_hand_aus(mesh: trimesh.Trimesh, seed: np.ndarray, second_finger: np.ndarray):
-    
-    mitte = (seed + second_finger) / 2
-    hoch_richtung = mitte - mesh.centroid
-    hoch_richtung = hoch_richtung / np.linalg.norm(hoch_richtung)
-    
-    #hoch_richtung entspricht jetzt der Vektor vom Mesh Centroid zum mittelpunkt der beiden Fingerspitzen
-    R = rotationsmatrix_zu_z_achse(hoch_richtung)
+    m = (seed + second_finger) / 2 - centroid
  
-    #trimesh will wieder eine 4 * mal 4 Matrix, tranformierungsmatrix wird einfach oben links abgelegt, rest bleibt Einheitsmatrix
+    m_parallel = np.dot(m, v_hat) * v_hat
+    m_perp = m - m_parallel
+    m_perp_norm = np.linalg.norm(m_perp)
+ 
+    if m_perp_norm < 1e-8:
+        beliebige = np.array([0, 0, 1.0]) if abs(v_hat[2]) < 0.9 else np.array([1.0, 0, 0])
+        m_perp_hat = beliebige - np.dot(beliebige, v_hat) * v_hat
+        m_perp_hat /= np.linalg.norm(m_perp_hat)
+    else:
+        m_perp_hat = m_perp / m_perp_norm
+ 
+    lokale_basis = np.column_stack([v_hat, m_perp_hat, np.cross(v_hat, m_perp_hat)])
+    ziel_basis = np.column_stack([[1, 0, 0], [0, 0, 1], np.cross([1, 0, 0], [0, 0, 1])])
+ 
+    return ziel_basis @ lokale_basis.T
+ 
+ 
+def richte_hand_aus(mesh, verlezter_finger: np.ndarray, second_finger: np.ndarray):
+    ist_pyvista = isinstance(mesh, p_v.PolyData)
+    centroid = np.asarray(mesh.points if ist_pyvista else mesh.centroid, dtype=float)
+
+    if ist_pyvista:
+        centroid = mesh.points.mean(axis=0)
+    else:
+        centroid = mesh.centroid
+ 
+    R = rotationsmatrix(verlezter_finger, second_finger, centroid)
+ 
     transform = np.eye(4)
     transform[:3, :3] = R
-    transform[:3, 3] = -R @ mesh.centroid
+    transform[:3, 3] = -R @ centroid
  
-    #Drehmatrix wird angewendet
-    ausgerichtetes_mesh = mesh.copy()
-    ausgerichtetes_mesh.apply_transform(transform)
+    if ist_pyvista:
+        ausgerichtetes_mesh = mesh.transform(transform, inplace=False)
+    else:
+        ausgerichtetes_mesh = mesh.copy()
+        ausgerichtetes_mesh.apply_transform(transform)
  
-    #Drehmatrix auch auf die Fingerpunkte, dass diese wieder passen
-    hurt_finger_neu = R @ (seed - mesh.centroid)
-    second_finger_neu = R @ (second_finger - mesh.centroid)
+    seed_neu = R @ (verlezter_finger - centroid)
+    second_finger_neu = R @ (second_finger - centroid)
  
-    return ausgerichtetes_mesh, hurt_finger_neu, second_finger_neu
+    return ausgerichtetes_mesh, seed_neu, second_finger_neu
+
+def djikstra_und_tiefster_punkt(mesh: p_v.PolyData, verlezter_finger: np.ndarray, second_finger: np.ndarray):
+    idx_a = mesh.find_closest_point(verlezter_finger)
+    idx_b = mesh.find_closest_point(second_finger)
+ 
+    pfad_mesh = mesh.geodesic(idx_a, idx_b)
+    pfad_punkte = pfad_mesh.points
+ 
+    tiefster_index = np.argmin(pfad_punkte[:, 2])
+    tiefster_punkt = np.array(pfad_punkte[tiefster_index])
+ 
+    kugel_radius = mesh.length * 0.01  # relativ zur Mesh-Groesse, damit sie immer sichtbar passt
+    kugel = p_v.Sphere(radius=kugel_radius, center=tiefster_punkt)
+ 
+    return tiefster_punkt, pfad_mesh, kugel
+
+
+def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_punkte: int = 2000) -> np.ndarray:
+
+    if anzahl_punkte > mesh.n_points:
+        raise ValueError(
+            f"anzahl_punkte ({anzahl_punkte}) ist größer als die Gesamtzahl "
+            f"der Vertices im Mesh ({mesh.n_points})."
+        )
+ 
+    baum = cKDTree(mesh.points)
+    _, indices = baum.query(verletzter_finger, k = anzahl_punkte)
+    nahe_punkte = mesh.points[indices]
+ 
+    zentriert = nahe_punkte - nahe_punkte.mean(axis=0)
+    kovarianz = np.cov(zentriert.T)
+    eigenwerte, eigenvektoren = np.linalg.eigh(kovarianz)
+ 
+    normale = eigenvektoren[:, np.argmax(eigenwerte)]
+ 
+    # Vorzeichen festlegen: Achse soll vom Hand-Schwerpunkt WEG zeigen
+    # (Finger zeigen anatomisch immer nach aussen, unabhaengig von der Pose)
+    hand_schwerpunkt = mesh.points.mean(axis=0)
+    richtung_vom_zentrum = verletzter_finger - hand_schwerpunkt
+
+    if np.dot(normale, richtung_vom_zentrum) < 0:
+        normale = -normale
+ 
+    return normale, nahe_punkte
 
 
 def isolate_finger(path: str):
@@ -208,24 +177,38 @@ def isolate_finger(path: str):
     print(f"Koordinaten des verlzten Fingers: {hurt_finger}")
     print(f"Finger des benachbarten Fingers: {second_finger}")
 
-    #von pyvista mesh tu trimesh mesh (pyvista hat nicht alle Funktionen, dass die Hand gscheid ausgerichtet werden kann)
-    faces = hand_mesh.faces.reshape(-1, 4)[:, 1:]
-    hand_mesh_trimesh =  trimesh.Trimesh(vertices = hand_mesh.points, faces=faces, process=False)
+    
     #Handausrichten
-    hand_ausgerichtet, hurt_finger, second_finger = richte_hand_aus(hand_mesh_trimesh, hurt_finger, second_finger)
-    achsen = trimesh.creation.axis(origin_size = 0.02, axis_length = 20)
-    achsen.apply_scale(6.0) 
-    szene = trimesh.Scene([hand_ausgerichtet, achsen]) 
-    szene.show()
-    #Djikstra
-    #tiefster Punkt
-    #normale
-    #Cutten
+    hand_ausgerichtet, hurt_finger, second_finger = richte_hand_aus(hand_mesh, hurt_finger, second_finger)
+    #Hand zeigen (für Testzwecke)
+    plotter_ausgerichtete_hand = p_v.Plotter()
+    achsen_actor = plotter_ausgerichtete_hand.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
+    achsen_actor.SetTotalLength(300, 300, 300)
+    plotter_ausgerichtete_hand.add_mesh(hand_ausgerichtet, color = "light_gray")
+    plotter_ausgerichtete_hand.show()
+    
+    #Djikstra & gleichzeitig tiefster Punkt
+    tiefster_punkt, pfad_mesh, kugel = djikstra_und_tiefster_punkt(hand_ausgerichtet, hurt_finger, second_finger)
+    #Handzeigen (für Testzwecke wieder):
+    djikstra_plotter = p_v.Plotter()
+    djikstra_plotter.add_mesh(hand_ausgerichtet, color = "light_gray")
+    djikstra_plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)   # der Pfad selbst
+    djikstra_plotter.add_mesh(kugel, color="red")  
+    djikstra_plotter.show()
+   
+    #Normale mit PCA (Principal Comonent Analysis bestimmen)
+    normale, verwendete_vertices = finger_normale(hand_ausgerichtet, hurt_finger)
+    #Hand wieder zeigen zum debuggen:
+    normalen_plotter = p_v.Plotter()
+    normalen_plotter.add_mesh(hand_ausgerichtet, color="lightgray")
+    normalen_plotter.add_points(verwendete_vertices, color="orange", point_size=6)
+    pfeil_normale = p_v.Arrow(start=hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
+    normalen_plotter.add_mesh(pfeil_normale, color="red")
+    normalen_plotter.show()
 
-    finger = None
-    my_finger_shower = p_v.Plotter()
-    my_finger_shower.add_mesh(finger, color = "blue")
-    my_finger_shower.show()
+    #Rotationsellipsoid bestimmen
+
+    #Cutten
 
     #Finger speichern
 
