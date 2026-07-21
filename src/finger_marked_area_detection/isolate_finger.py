@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 import trimesh
 from scipy.spatial import cKDTree
+from PIL import Image
 
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
@@ -213,8 +214,7 @@ def erstelle_schnitt_zylinder(
     return p_v.Cylinder(center = zylinder_mitte, direction = normale, radius = radius, height = hoehe)
 
 
-def speichere_isolierten_finger(scan_ordner_pfad: str, isolierter_finger: p_v.PolyData) -> Path:
-    
+def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: list) -> Path:
     scan_ordner = Path(scan_ordner_pfad)
     originale_scans_ordner = scan_ordner.parent
     patienten_ordner = originale_scans_ordner.parent
@@ -228,18 +228,29 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, isolierter_finger: p_v.Po
  
     save_path = ziel_ordner / f"{ziel_name}.obj"
  
-    faces = isolierter_finger.triangulate().faces.reshape(-1, 4)[:, 1:]
-    tmesh = trimesh.Trimesh(
-        vertices=isolierter_finger.triangulate().points, faces=faces, process=False
-    )
+    geometrien = {}
+    for i, (pv_mesh, tex) in enumerate(texture_teile_isoliert):
+        dreiecks_mesh = pv_mesh.triangulate()
+        faces = dreiecks_mesh.faces.reshape(-1, 4)[:, 1:]
  
-    if isolierter_finger.active_texture_coordinates is not None:
-        uv = np.asarray(isolierter_finger.active_texture_coordinates)
-        print("Hinweis: Textur-Koordinaten vorhanden, aber kein Bild uebergeben - "
-              "nur Geometrie wird gespeichert. Siehe Kommentar im Code.")
+        if dreiecks_mesh.active_texture_coordinates is None:
+            print(f"Warnung: Teil {i} hat keine Textur-Koordinaten, wird uebersprungen.")
+            continue
  
-    tmesh.export(str(save_path))
-    print(f"Isolierter Finger gespeichert unter: {save_path}")
+        uv = np.asarray(dreiecks_mesh.active_texture_coordinates)
+        bild = Image.fromarray(tex.to_array())
+ 
+        tmesh = trimesh.Trimesh(vertices=dreiecks_mesh.points, faces=faces, process=False)
+        tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=bild)
+        geometrien[f"teil_{i}"] = tmesh
+ 
+    if not geometrien:
+        raise ValueError("Keine gueltigen texturierten Teile zum Speichern gefunden.")
+ 
+    scene = trimesh.Scene(geometrien)
+    scene.export(str(save_path))
+ 
+    print(f"Isolierter Finger ({len(geometrien)} Materialien) gespeichert unter: {save_path}")
     return save_path
 
 
@@ -308,7 +319,7 @@ def isolate_finger(path: str):
     iso_finger_plotter.show()
 
     #Finger speichern
-    speichere_isolierten_finger(path, finger_isoliert)
+    speichere_isolierten_finger(path, texture_teile_isoliert)
 
 path_string = input("Pfad eingeben:")
 isolate_finger(path_string)
