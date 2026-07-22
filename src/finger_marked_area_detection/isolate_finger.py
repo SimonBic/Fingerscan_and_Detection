@@ -203,7 +203,8 @@ def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_pun
 def erstelle_schnitt_ellipsoid(
         lokales_zentrum: np.ndarray, 
         normale: np.ndarray,
-        verwendete_punkte: np.ndarray, tiefster_punkt: np.ndarray,
+        verwendete_punkte: np.ndarray, 
+        tiefster_punkt: np.ndarray,
         unterschreitung: float = 0.45) -> p_v.PolyData:
 
     if abs(normale[2]) < 1e-8:
