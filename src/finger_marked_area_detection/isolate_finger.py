@@ -50,7 +50,7 @@ def transformiere_teile(teile: list, transform_matrix) -> list:
 def clippe_teile(teile: list, zylinder: p_v.PolyData) -> list:
     ergebnis = []
     for teil, tex in teile:
-        geschnitten = teil.clip_surface(zylinder, invert=True)
+        geschnitten = teil.clip_surface(zylinder, invert = False)
         if geschnitten.n_points > 0:
             ergebnis.append((geschnitten, tex))
     return ergebnis
@@ -149,6 +149,28 @@ def djikstra_und_tiefster_punkt(mesh: p_v.PolyData, verlezter_finger: np.ndarray
     return tiefster_punkt, pfad_mesh, kugel
 
 
+def rotationsmatrix_a_nach_b(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    #Verwendete Rodriques Rotationsformel.
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+    achse = np.cross(a, b)
+    sin_winkel = np.linalg.norm(achse)
+    cos_winkel = np.dot(a, b)
+ 
+    if sin_winkel < 1e-8:
+        if cos_winkel > 0:
+            return np.eye(3)
+        beliebig = np.array([1.0, 0, 0]) if abs(a[0]) < 0.9 else np.array([0, 1.0, 0])
+        achse2 = np.cross(a, beliebig)
+        achse2 /= np.linalg.norm(achse2)
+        K = np.array([[0, -achse2[2], achse2[1]], [achse2[2], 0, -achse2[0]], [-achse2[1], achse2[0], 0]])
+        return np.eye(3) + 2 * K @ K
+ 
+    achse = achse / sin_winkel
+    K = np.array([[0, -achse[2], achse[1]], [achse[2], 0, -achse[0]], [-achse[1], achse[0], 0]])
+    return np.eye(3) + K * sin_winkel + K @ K * (1 - cos_winkel)
+
+
 def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_punkte: int = 2000) -> np.ndarray:
 
     if anzahl_punkte > mesh.n_points:
@@ -178,40 +200,50 @@ def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_pun
     return normale, nahe_punkte, nahe_punkte.mean(axis = 0)
 
 
-def erstelle_schnitt_zylinder(
+def erstelle_schnitt_ellipsoid(
         lokales_zentrum: np.ndarray, 
         normale: np.ndarray,
-        verwendete_punkte: np.ndarray, 
-        tiefster_punkt: np.ndarray,
-        radius_marge: float = 1.2) -> p_v.PolyData:
-    
+        verwendete_punkte: np.ndarray, tiefster_punkt: np.ndarray,
+        unterschreitung: float = 0.45) -> p_v.PolyData:
+
     if abs(normale[2]) < 1e-8:
         raise ValueError(
-            "Fingerachse verläuft horizontal Zylinder-Boden kann nicht eindeutig auf eine Hoehe (Z) gelegt werden."
+            "Fingerachse verläuft horizontal zur Ellipsoid-Ausrichtung kann nicht eindeutig auf eine Höhe z bezogen werden."
         )
  
-    # Punkt auf der Fingerachse finden, der dieselbe Höhe (Z) wie tiefster Punkte, also der des Djikstra erstlle Punkt
     t_boden = (tiefster_punkt[2] - lokales_zentrum[2]) / normale[2]
  
     relative_punkte = verwendete_punkte - lokales_zentrum
     axiale_projektionen = relative_punkte @ normale
- 
     radiale_komponenten = relative_punkte - np.outer(axiale_projektionen, normale)
-    radiale_abstaende = np.linalg.norm(radiale_komponenten, axis=1)
-    radius = radiale_abstaende.max() * radius_marge
+    radius_original = np.linalg.norm(radiale_komponenten, axis=1).max()
  
     t_oben = axiale_projektionen.max()
-
     if t_oben <= t_boden:
         raise ValueError(
-            "Der Wurzel-Punkt liegt auf oder über der obersten PCA-Nachbarschaft"
-            "Prüfe tiefster_punkt/lokales_zentrum auf Plausibilitaet."
+            "Der Wurzel-Punkt liegt auf oder ueber der obersten PCA-Nachbarschaft - "
+            "pruefe tiefster_punkt/lokales_zentrum auf Plausibilitaet."
         )
  
-    hoehe = t_oben - t_boden
-    zylinder_mitte = lokales_zentrum + normale * (t_boden + t_oben) / 2
+    original_laenge = t_oben - t_boden
+    aequator_radius = 2 * radius_original
+    halbe_hauptachse = 0.8 * original_laenge
  
-    return p_v.Cylinder(center = zylinder_mitte, direction = normale, radius = radius, height = hoehe)
+    unten_spitze_t = t_boden - unterschreitung * original_laenge
+    zentrum_t = unten_spitze_t + halbe_hauptachse
+    ellipsoid_mitte = lokales_zentrum + normale * zentrum_t
+ 
+    # Ellipsoid entlang X bauen (Standard-Ausrichtung von
+    # ParametricEllipsoid), dann auf 'normale' drehen + verschieben
+    basis_ellipsoid = p_v.ParametricEllipsoid(
+        xradius=halbe_hauptachse, yradius=aequator_radius, zradius=aequator_radius
+    )
+    R = rotationsmatrix_a_nach_b(np.array([1.0, 0, 0]), normale)
+    transform = np.eye(4)
+    transform[:3, :3] = R
+    transform[:3, 3] = ellipsoid_mitte
+ 
+    return basis_ellipsoid.transform(transform, inplace = False)
 
 
 def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: list) -> Path:
@@ -303,17 +335,17 @@ def isolate_finger(path: str):
     normalen_plotter.add_mesh(pfeil_normale, color="red")
     normalen_plotter.show()
 
-    #Schnittzylinder bestimmen, Eventuell ändere ich das noch in einen Ellipsoiden ab
-    zylinder = erstelle_schnitt_zylinder(avg_point_of_hurt_finger, normale, verwendete_vertices, tiefster_punkt, radius_marge = 1.4)
+    #Schnittellipsoid bestimmen
+    ellipsoid = erstelle_schnitt_ellipsoid(avg_point_of_hurt_finger, normale, verwendete_vertices, tiefster_punkt)
     #zeigen, zum debuggen
-    zylinder_plotter = p_v.Plotter()
-    zeige_mit_texturen(zylinder_plotter, texture_teile)
-    zylinder_plotter.add_mesh(zylinder, color = "cyan", opacity = 0.3)
-    zylinder_plotter.show()
+    ellipsoid_plotter = p_v.Plotter()
+    zeige_mit_texturen(ellipsoid_plotter, texture_teile)
+    ellipsoid_plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)
+    ellipsoid_plotter.show()
 
     #Cutten
-    finger_isoliert = hand_ausgerichtet.clip_surface(zylinder, invert=True)
-    texture_teile_isoliert = clippe_teile(texture_teile, zylinder)
+    finger_isoliert = hand_ausgerichtet.clip_surface(ellipsoid, invert = False)
+    texture_teile_isoliert = clippe_teile(texture_teile, ellipsoid)
     iso_finger_plotter = p_v.Plotter()
     zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
     iso_finger_plotter.show()
