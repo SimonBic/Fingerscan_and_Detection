@@ -205,7 +205,7 @@ def erstelle_schnitt_ellipsoid(
         normale: np.ndarray,
         verwendete_punkte: np.ndarray, 
         tiefster_punkt: np.ndarray,
-        unterschreitung: float = 0.45) -> p_v.PolyData:
+        unterschreitung: float = 0.6) -> p_v.PolyData:
 
     if abs(normale[2]) < 1e-8:
         raise ValueError(
@@ -228,7 +228,7 @@ def erstelle_schnitt_ellipsoid(
  
     original_laenge = t_oben - t_boden
     aequator_radius = 2 * radius_original
-    halbe_hauptachse = 0.8 * original_laenge
+    halbe_hauptachse = 1.3 * original_laenge
  
     unten_spitze_t = t_boden - unterschreitung * original_laenge
     zentrum_t = unten_spitze_t + halbe_hauptachse
