@@ -111,10 +111,10 @@ def lade_markierung_mit_landmarken(obj_pfad: Path):
     return flaeche_punkte, landmarken
 
 
-if __name__ == "__main__":
+def heatmap_main(path: str):
     import matplotlib.pyplot as plt
 
-    markierungen_ordner = Path(input("Pfad zum 'Markierungen'-Ordner: "))
+    markierungen_ordner = Path(path)
     obj_dateien = sorted(markierungen_ordner.glob("*.obj"))
 
     if not obj_dateien:

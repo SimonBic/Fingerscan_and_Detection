@@ -8,3 +8,7 @@ PIL
 time
 pyvista
 vtk
+sys
+PySide6
+pyvistaqt
+os

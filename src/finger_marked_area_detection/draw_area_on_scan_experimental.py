@@ -264,19 +264,19 @@ def draw_circle_on_scan(mesh):
 
     
 
+def draw_main(path_to_directory: str):
+    path_to_directory = Path(path_to_directory)
+    obj_files = list(path_to_directory.glob("*.obj"))
 
-path_to_directory = Path(input("Pfad: "))
-obj_files = list(path_to_directory.glob("*.obj"))
+    texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-texture_teile = load_teilmeshe_mit_textur(obj_files)
+    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile)
 
-drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile)
-
-if drawn_flaeche is not None:
-    speichern_frage = input("Markierung speichern? (y / n)")
-    farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
-    if speichern_frage == "y":
-        path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
-    # heatmap_frage = input("zu 2D transformieren? (y / n)")
-    # if heatmap_frage == "y":
+    if drawn_flaeche is not None:
+        speichern_frage = input("Markierung speichern? (y / n)")
+        farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
+        if speichern_frage == "y":
+            path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
+        # heatmap_frage = input("zu 2D transformieren? (y / n)")
+        # if heatmap_frage == "y":
     #     heatmap2D_to_3D(drawn_flaeche, landmarken, path_marked_area)

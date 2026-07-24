@@ -354,8 +354,8 @@ def isolate_finger(path: str):
     #Finger speichern
     speichere_isolierten_finger(path, texture_teile_isoliert)
 
-path_string = input("Pfad eingeben:")
-isolate_finger(path_string)
+# path_string = input("Pfad eingeben:")
+# isolate_finger(path_string)
 
 
 
