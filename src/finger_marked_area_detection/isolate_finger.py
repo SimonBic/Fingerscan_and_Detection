@@ -205,6 +205,8 @@ def erstelle_schnitt_ellipsoid(
         normale: np.ndarray,
         verwendete_punkte: np.ndarray, 
         tiefster_punkt: np.ndarray,
+        radius_faktor = 2.0,
+        laengen_faktor = 0.8,
         unterschreitung: float = 0.6) -> p_v.PolyData:
 
     if abs(normale[2]) < 1e-8:
@@ -227,9 +229,8 @@ def erstelle_schnitt_ellipsoid(
         )
  
     original_laenge = t_oben - t_boden
-    aequator_radius = 2 * radius_original
-    halbe_hauptachse = 1.3 * original_laenge
- 
+    aequator_radius = radius_faktor * radius_original
+    halbe_hauptachse = laengen_faktor * original_laenge
     unten_spitze_t = t_boden - unterschreitung * original_laenge
     zentrum_t = unten_spitze_t + halbe_hauptachse
     ellipsoid_mitte = lokales_zentrum + normale * zentrum_t
@@ -257,6 +258,7 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
  
     ziel_name = scan_ordner.name + "_isoliert"
     ziel_ordner = isolierte_scans_ordner / ziel_name
+    return_ordner = ziel_ordner
     ziel_ordner.mkdir(exist_ok=True)
  
     save_path = ziel_ordner / f"{ziel_name}.obj"
@@ -284,20 +286,32 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
     scene.export(str(save_path))
  
     print(f"Isolierter Finger ({len(geometrien)} Materialien) gespeichert unter: {save_path}")
-    return save_path
+    return return_ordner
 
+###!!! Der Spaß ist jetzt n Generator, also mit "for _ in isoltae_finer(...): \n\tab pass" aufrufen!!!
 
-def isolate_finger(path: str):
+def isolate_finger(path: str,
+                plotter = None,
+                radius_faktor = 2.0,
+                laengen_faktor = 0.8,
+                unterschreitung = 0.45,
+                zeige_zwischenschritte = True):
     path = Path(path)
     obj_file = list(path.glob("*.obj"))
 
     texture_teile = load_teilmeshe_mit_textur(obj_file)
     hand_mesh = p_v.merge([teil for teil, tex in texture_teile])
 
-    my_p_v_plotter = p_v.Plotter()
-    zeige_mit_texturen(my_p_v_plotter, texture_teile)
-
-    hurt_finger, second_finger = pick_finger_point(my_p_v_plotter, hand_mesh)
+    if plotter is not None:
+        plotter.clear()
+        zeige_mit_texturen(plotter, texture_teile)
+        plotter.reset_camera()
+        yield
+        hurt_finger, second_finger = pick_finger_point(plotter, hand_mesh)
+    else:
+        my_p_v_plotter = p_v.Plotter()
+        zeige_mit_texturen(my_p_v_plotter, texture_teile)
+        hurt_finger, second_finger = pick_finger_point(my_p_v_plotter, hand_mesh)
     if (hurt_finger is None) or (second_finger is None):
         raise ValueError("Ungenügend Fingerspitzen gewählt")
     
@@ -311,48 +325,96 @@ def isolate_finger(path: str):
     texture_teile = transformiere_teile(texture_teile, transformierungsmatrix) 
 
     #Hand zeigen (für Testzwecke)
-    plotter_ausgerichtete_hand = p_v.Plotter()
-    zeige_mit_texturen(plotter_ausgerichtete_hand, texture_teile)
-    achsen_actor = plotter_ausgerichtete_hand.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
-    achsen_actor.SetTotalLength(300, 300, 300)
-    plotter_ausgerichtete_hand.show()
+    if zeige_zwischenschritte:
+        if plotter is not None:
+            plotter.clear()
+            zeige_mit_texturen(plotter, texture_teile)
+            plotter.reset_camera()
+            yield #Macht die Funktion zu einem Generator
+        else:
+            plotter_ausgerichtete_hand = p_v.Plotter()
+            zeige_mit_texturen(plotter_ausgerichtete_hand, texture_teile)
+            achsen_actor = plotter_ausgerichtete_hand.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
+            achsen_actor.SetTotalLength(300, 300, 300)
+            plotter_ausgerichtete_hand.show()
     
     #Djikstra & gleichzeitig tiefster Punkt
     tiefster_punkt, pfad_mesh, kugel = djikstra_und_tiefster_punkt(hand_ausgerichtet, hurt_finger, second_finger)
     #Handzeigen (für Testzwecke wieder):
-    djikstra_plotter = p_v.Plotter()
-    zeige_mit_texturen(djikstra_plotter, texture_teile)
-    djikstra_plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)   # der Pfad selbst
-    djikstra_plotter.add_mesh(kugel, color="red")  
-    djikstra_plotter.show()
-   
+    if zeige_zwischenschritte:
+        if plotter is not None:
+            plotter.clear()
+            zeige_mit_texturen(plotter, texture_teile)
+            plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)
+            plotter.add_mesh(kugel, color="red")
+            plotter.reset_camera()  
+            yield
+        else:
+            djikstra_plotter = p_v.Plotter()
+            zeige_mit_texturen(djikstra_plotter, texture_teile)
+            djikstra_plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)   # der Pfad selbst
+            djikstra_plotter.add_mesh(kugel, color="red")  
+            djikstra_plotter.show()
+    
     #Normale mit PCA (Principal Comonent Analysis bestimmen)
     normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(hand_ausgerichtet, hurt_finger, 3000)
     #Hand wieder zeigen zum debuggen:
-    normalen_plotter = p_v.Plotter()
-    zeige_mit_texturen(normalen_plotter, texture_teile)
-    normalen_plotter.add_points(verwendete_vertices, color="orange", point_size=6)
-    pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
-    normalen_plotter.add_mesh(pfeil_normale, color="red")
-    normalen_plotter.show()
+    if zeige_zwischenschritte:
+        if plotter is not None:
+            plotter.clear()
+            zeige_mit_texturen(plotter, texture_teile)
+            plotter.add_points(verwendete_vertices, color="orange", point_size=6)
+            pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
+            plotter.add_mesh(pfeil_normale, color="red")
+            plotter.reset_camera()
+            yield
+        else:
+            normalen_plotter = p_v.Plotter()
+            zeige_mit_texturen(normalen_plotter, texture_teile)
+            normalen_plotter.add_points(verwendete_vertices, color="orange", point_size=6)
+            pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
+            normalen_plotter.add_mesh(pfeil_normale, color="red")
+            normalen_plotter.show()
 
     #Schnittellipsoid bestimmen
-    ellipsoid = erstelle_schnitt_ellipsoid(avg_point_of_hurt_finger, normale, verwendete_vertices, tiefster_punkt)
+    ellipsoid = erstelle_schnitt_ellipsoid(
+        avg_point_of_hurt_finger, 
+        normale, 
+        verwendete_vertices, 
+        tiefster_punkt,
+        radius_faktor = radius_faktor,
+        laengen_faktor = laengen_faktor,
+        unterschreitung = unterschreitung)
     #zeigen, zum debuggen
-    ellipsoid_plotter = p_v.Plotter()
-    zeige_mit_texturen(ellipsoid_plotter, texture_teile)
-    ellipsoid_plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)
-    ellipsoid_plotter.show()
+    if zeige_zwischenschritte:
+        if plotter is not None:
+            plotter.clear()
+            zeige_mit_texturen(plotter, texture_teile)
+            plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)          
+            plotter.reset_camera()  
+            yield    
+        else:
+            ellipsoid_plotter = p_v.Plotter()
+            zeige_mit_texturen(ellipsoid_plotter, texture_teile)
+            ellipsoid_plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)
+            ellipsoid_plotter.show()
 
     #Cutten
     finger_isoliert = hand_ausgerichtet.clip_surface(ellipsoid, invert = False)
     texture_teile_isoliert = clippe_teile(texture_teile, ellipsoid)
-    iso_finger_plotter = p_v.Plotter()
-    zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
-    iso_finger_plotter.show()
+    if plotter is not None:
+        plotter.clear()
+        zeige_mit_texturen(plotter, texture_teile_isoliert)
+        plotter.reset_camera()
+    else:
+        iso_finger_plotter = p_v.Plotter()
+        zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
+        iso_finger_plotter.show()
 
     #Finger speichern
-    speichere_isolierten_finger(path, texture_teile_isoliert)
+    markierungsordner = speichere_isolierten_finger(path, texture_teile_isoliert)
+
+    return markierungsordner
 
 # path_string = input("Pfad eingeben:")
 # isolate_finger(path_string)
