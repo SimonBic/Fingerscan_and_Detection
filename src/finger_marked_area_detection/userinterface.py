@@ -201,7 +201,7 @@ class HauptFenster(QMainWindow):
 
     def manuell_klick(self):
         ordner = Path(self.aktueller_ordner)
-        self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=True)
+        self.isolieren_ablauf = isolate_finger(str(ordner), plotter = self.plotter, zeige_zwischenschritte=True)
         self.button_weiter.setVisible(True)
         next(self.isolieren_ablauf)
 
@@ -238,7 +238,7 @@ class HauptFenster(QMainWindow):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
-        draw_main(str(self.aktueller_ordner))   # Parameter an deine echte Signatur anpassen
+        draw_main(str(self.aktueller_ordner), self.plotter)   # Parameter an deine echte Signatur anpassen
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:

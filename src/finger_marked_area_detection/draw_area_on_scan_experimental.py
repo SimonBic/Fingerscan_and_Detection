@@ -213,10 +213,10 @@ def extract_faces_of_hand(hand_mesh, mask):
         vtk_faces
     )
 
-def draw_circle_on_scan(mesh):
+def draw_circle_on_scan(mesh, plotter: p_v.Plotter):
     drawn_flaeche = {"flaeche": None}
 
-    my_p_v_plotter = p_v.Plotter()
+    my_p_v_plotter = plotter
 
     hand_mesh = p_v.merge([teil for teil, textur in mesh])
 
@@ -264,19 +264,21 @@ def draw_circle_on_scan(mesh):
 
     
 
-def draw_main(path_to_directory: str):
+def draw_main(path_to_directory: str, plotter = p_v.Plotter) -> Path:
     path_to_directory = Path(path_to_directory)
     obj_files = list(path_to_directory.glob("*.obj"))
 
     texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile)
+    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile, plotter)
 
-    if drawn_flaeche is not None:
-        speichern_frage = input("Markierung speichern? (y / n)")
-        farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
-        if speichern_frage == "y":
-            path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, farben_frage, landmarken)
+    # if drawn_flaeche is not None:
+    #     speichern_frage = input("Markierung speichern? (y / n)")
+    #     farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
+    #     if speichern_frage == "y":
+            
+    path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, "grün", landmarken)
+    return Path(path_marked_area)
         # heatmap_frage = input("zu 2D transformieren? (y / n)")
         # if heatmap_frage == "y":
     #     heatmap2D_to_3D(drawn_flaeche, landmarken, path_marked_area)
