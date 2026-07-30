@@ -54,9 +54,10 @@ def speichere_isolate_finger_parameter(
 def generator_bis_ende(generator):
     try:
         while True:
-            next(generator)
+            ordner = next(generator)
     except StopIteration as e:
         return e.value
+    return ordner
 
 class HauptFenster(QMainWindow):
     def __init__(self):
@@ -67,6 +68,7 @@ class HauptFenster(QMainWindow):
 
         self.aktueller_ordner = None
         self.isolieren_ablauf = None
+        self.automatisch_modus_aktiv = False
 
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
@@ -153,11 +155,13 @@ class HauptFenster(QMainWindow):
         self.lade_und_zeige(ordner)
  
     def lade_und_zeige(self, ordner: Path):
+        print("DEBUG - lade_und_zeige bekommt Ordner:", ordner, "| ist Ordner?", ordner.is_dir())
         try:
             obj_file = list(ordner.glob("*.obj"))
+            print("DEBUG - gefundene .obj-Dateien:", obj_file)
             teile = load_teilmeshe_mit_textur(obj_file)
         except Exception as e:
-            self.hinweis_label.setText(f"Fehler beim Laden: {e}")
+            self.hinweis_label.setText(f"Fehler beim Laden (ui, lade_und_zeige): {e}")
             return
  
         self.plotter.clear()
@@ -170,6 +174,8 @@ class HauptFenster(QMainWindow):
         self.hinweis_label.setText(f"Geladen: {ordner.name}")
 
     def isolieren_klick(self):
+        self.button_automatisch.setVisible(True)   
+        self.button_manuell.setVisible(True)   
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
@@ -177,20 +183,21 @@ class HauptFenster(QMainWindow):
         self.haupt_buttons_container.setVisible(False)
 
     def automatisch_klick(self):
+        self.button_automatisch.setVisible(False)   
+        self.button_manuell.setVisible(False)         
         ordner = Path(self.aktueller_ordner)
         gespeichert = lade_isolate_finger_parameter(ordner)
 
         if gespeichert:
-            gen = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False, **gespeichert)
+            self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False, **gespeichert)
         else:
-            gen = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False)
+            self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False)
 
-        gespeicherter_obj_pfad = generator_bis_ende(gen)   
+        self.automatisch_modus_aktiv = True
 
-        self.isolieren_wahl_container.setVisible(False)
-        self.haupt_buttons_container.setVisible(True)
-
-        self.lade_und_zeige(Path(gespeicherter_obj_pfad))   
+        self.button_weiter.setText("Fertig markiert")
+        self.button_weiter.setVisible(True)
+        next(self.isolieren_ablauf) 
 
     def manuell_klick(self):
         ordner = Path(self.aktueller_ordner)
@@ -199,6 +206,27 @@ class HauptFenster(QMainWindow):
         next(self.isolieren_ablauf)
 
     def weiter_klick(self):
+        if getattr(self, "automatisch_modus_aktiv", False):
+            # Nutzer hat gerade 2 Punkte geklickt und "Fertig markiert" gedrueckt
+            self.automatisch_modus_aktiv = False
+            self.button_weiter.setText("Weiter")
+            self.button_weiter.setVisible(False)
+
+            try:
+                gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)  # Rest jetzt automatisch
+                self.aktueller_ordner = Path(gespeicherter_obj_pfad)
+            except Exception as e:
+                self.hinweis_label.setText(f"Fehler: {e}")
+                self.isolieren_wahl_container.setVisible(False)
+                self.haupt_buttons_container.setVisible(True)
+                return
+
+            self.isolieren_wahl_container.setVisible(False)
+            self.haupt_buttons_container.setVisible(True)
+            self.lade_und_zeige(Path(gespeicherter_obj_pfad))   
+            return
+
+        # bisheriger "manuell"-Ablauf bleibt unveraendert
         try:
             next(self.isolieren_ablauf)
         except StopIteration:

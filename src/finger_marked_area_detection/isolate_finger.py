@@ -306,8 +306,24 @@ def isolate_finger(path: str,
         plotter.clear()
         zeige_mit_texturen(plotter, texture_teile)
         plotter.reset_camera()
-        yield
-        hurt_finger, second_finger = pick_finger_point(plotter, hand_mesh)
+
+        punkte = []
+        def punkt_callback(point, picker):
+            punkte.append(np.array(point))
+            print(f"Punkt {len(punkte)} gewählt bei: {point}")
+
+        plotter.enable_point_picking(
+            callback=punkt_callback, use_picker=True, show_point=True, color="red", point_size=15
+        )
+
+        yield   # Nutzer klickt jetzt 2 Punkte, dann "Fertig markiert"/"Weiter"
+
+        plotter.disable_picking()
+
+        if len(punkte) < 2:
+            raise ValueError("Nicht genug Punkte gewählt - bitte 2 Punkte anklicken, bevor weitergemacht wird.")
+
+        hurt_finger, second_finger = punkte[0], punkte[1]
     else:
         my_p_v_plotter = p_v.Plotter()
         zeige_mit_texturen(my_p_v_plotter, texture_teile)
