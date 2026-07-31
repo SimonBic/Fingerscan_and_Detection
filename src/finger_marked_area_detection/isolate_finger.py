@@ -374,13 +374,13 @@ def isolate_finger(path: str,
     
     #Normale mit PCA (Principal Comonent Analysis bestimmen)
     normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(hand_ausgerichtet, hurt_finger, 3000)
+    pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50) 
     #Hand wieder zeigen zum debuggen:
     if zeige_zwischenschritte:
         if plotter is not None:
             plotter.clear()
             zeige_mit_texturen(plotter, texture_teile)
             plotter.add_points(verwendete_vertices, color="orange", point_size=6)
-            pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
             plotter.add_mesh(pfeil_normale, color="red")
             plotter.reset_camera()
             yield
@@ -388,7 +388,6 @@ def isolate_finger(path: str,
             normalen_plotter = p_v.Plotter()
             zeige_mit_texturen(normalen_plotter, texture_teile)
             normalen_plotter.add_points(verwendete_vertices, color="orange", point_size=6)
-            pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50)  # scale = Laenge in mm, anpassen
             normalen_plotter.add_mesh(pfeil_normale, color="red")
             normalen_plotter.show()
 
@@ -427,6 +426,7 @@ def isolate_finger(path: str,
         zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
         iso_finger_plotter.show()
 
+    
     #Finger speichern
     markierungsordner = speichere_isolierten_finger(path, texture_teile_isoliert)
 

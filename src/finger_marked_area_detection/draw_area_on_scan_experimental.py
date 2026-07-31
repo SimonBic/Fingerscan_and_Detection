@@ -2,7 +2,6 @@ import pyvista as p_v
 from pathlib import Path
 import trimesh
 import numpy as np
-#import finger_marked_area_detection.prototyp.load_scan as load_scan
 import vtk
 from PIL import Image 
 import heatmap
@@ -80,12 +79,17 @@ def save_drawn_area(area, original_folder, farbenname, landmarken):
 
     farbe = HEATMAPFARBEN[farbenname]
 
-    output_ordner = original_folder.parent / "Markierungen"
+    save_name = original_folder.name
 
+    output_ordner = original_folder.parent.parent / "markierte_scans"
+    
     output_ordner.mkdir(exist_ok = True)
 
-    save_name = original_folder.name
-    save_path = output_ordner / (save_name + "_marked.obj")
+    singlemarking_ordner = original_folder.parent.parent / "markierte_scans" / (save_name + "_marked")
+    
+    singlemarking_ordner.mkdir(exist_ok = True)
+
+    save_path = singlemarking_ordner / (save_name + "_marked.obj")
 
     zaehler = 1
     while save_path.exists():
@@ -213,7 +217,7 @@ def extract_faces_of_hand(hand_mesh, mask):
         vtk_faces
     )
 
-def draw_circle_on_scan(mesh, plotter: p_v.Plotter):
+def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path):
     drawn_flaeche = {"flaeche": None}
 
     my_p_v_plotter = plotter
@@ -241,6 +245,7 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter):
 
             my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
             print("Kreis geschlossen!")
+            path_marked_area = save_drawn_area(drawn_flaeche["flaeche"], path, "grün", landmarken)
 
     
     def path_picking_starten():
@@ -270,14 +275,14 @@ def draw_main(path_to_directory: str, plotter = p_v.Plotter) -> Path:
 
     texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile, plotter)
+    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile, plotter, path_to_directory)
 
     # if drawn_flaeche is not None:
     #     speichern_frage = input("Markierung speichern? (y / n)")
     #     farben_frage = input("Welche Fabre soll für die Heatmap gewählt werden? (rot / orange / gelb / grün)")
     #     if speichern_frage == "y":
             
-    path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, "grün", landmarken)
+    #path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, "grün", landmarken)
     return Path(path_marked_area)
         # heatmap_frage = input("zu 2D transformieren? (y / n)")
         # if heatmap_frage == "y":

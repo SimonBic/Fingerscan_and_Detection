@@ -117,7 +117,18 @@ class HauptFenster(QMainWindow):
         self.button_weiter.setVisible(False)
 
         self.knopf_layout.addWidget(self.isolieren_wahl_container)
-        self.isolieren_wahl_container.setVisible(False)                 
+        self.isolieren_wahl_container.setVisible(False) 
+
+        self.malen_wahl_container = QWidget()
+        malen_wahl_layout = QVBoxLayout(self.malen_wahl_container)
+        self.button_weiter_malen = QPushButton("Fertig gemalt")
+        self.button_weiter_malen.setFixedSize(192, 108)
+        self.button_weiter_malen.clicked.connect(self.weiter_klick_malen)
+        malen_wahl_layout.addWidget(self.button_weiter_malen)
+        self.button_weiter_malen.setVisible(False)
+
+        self.knopf_layout.addWidget(self.malen_wahl_container)
+        self.malen_wahl_container.setVisible(False)        
 
         haupt_layout.addWidget(self.knopf_spalte, stretch=1)     
 
@@ -235,10 +246,16 @@ class HauptFenster(QMainWindow):
             self.haupt_buttons_container.setVisible(True)
 
     def zeichnen_klick(self):
+        self.haupt_buttons_container.setVisible(False)
+        self.malen_wahl_container.setVisible(True)
+        self.button_weiter_malen.setVisible(True)
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
         draw_main(str(self.aktueller_ordner), self.plotter)   # Parameter an deine echte Signatur anpassen
+
+    def weiter_klick_malen(self):
+        pass
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
