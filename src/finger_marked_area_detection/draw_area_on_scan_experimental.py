@@ -217,12 +217,11 @@ def extract_faces_of_hand(hand_mesh, mask):
         vtk_faces
     )
 
-def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path):
-    drawn_flaeche = {"flaeche": None}
-
+def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
     my_p_v_plotter = plotter
 
     hand_mesh = p_v.merge([teil for teil, textur in mesh])
+
 
     def line_done(scan):
         print(f"Fertig gemalt, du hast gesamt {scan.n_points} Punkte.")
@@ -241,14 +240,15 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path):
 
             mask = get_hand_region(hand_mesh, scan.points)
             flaeche = extract_faces_of_hand(hand_mesh, mask)
-            drawn_flaeche["flaeche"] = flaeche
+            status["flaeche"] = flaeche
 
             my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
             print("Kreis geschlossen!")
-            path_marked_area = save_drawn_area(drawn_flaeche["flaeche"], path, "grün", landmarken)
+            return
 
     
     def path_picking_starten():
+        my_p_v_plotter.disable_picking()
         my_p_v_plotter.enable_path_picking(
             callback=line_done,
             color="blue",
@@ -258,24 +258,19 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path):
     for teil, textur in mesh:
         my_p_v_plotter.add_mesh(teil, texture=textur, smooth_shading=True)
 
-    # NEU: Landmarken-Picking einrichten (Tasten 1/2/3)
-    landmarken = landmarken_picking_einrichten(my_p_v_plotter, path_picking_starten)
+    status["landmarken"] = landmarken_picking_einrichten(my_p_v_plotter, path_picking_starten)
 
     path_picking_starten()
-
-    my_p_v_plotter.show()
-
-    return drawn_flaeche["flaeche"], landmarken
-
+    
     
 
-def draw_main(path_to_directory: str, plotter = p_v.Plotter) -> Path:
+def draw_main(path_to_directory: str, plotter: p_v.Plotter, status):
     path_to_directory = Path(path_to_directory)
     obj_files = list(path_to_directory.glob("*.obj"))
 
     texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-    drawn_flaeche, landmarken = draw_circle_on_scan(texture_teile, plotter, path_to_directory)
+    draw_circle_on_scan(texture_teile, plotter, path_to_directory, status)
 
     # if drawn_flaeche is not None:
     #     speichern_frage = input("Markierung speichern? (y / n)")
@@ -283,7 +278,7 @@ def draw_main(path_to_directory: str, plotter = p_v.Plotter) -> Path:
     #     if speichern_frage == "y":
             
     #path_marked_area = save_drawn_area(drawn_flaeche, path_to_directory, "grün", landmarken)
-    return Path(path_marked_area)
+    #return drawn_flaeche, landmarken
         # heatmap_frage = input("zu 2D transformieren? (y / n)")
         # if heatmap_frage == "y":
     #     heatmap2D_to_3D(drawn_flaeche, landmarken, path_marked_area)

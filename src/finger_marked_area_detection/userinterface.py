@@ -8,7 +8,7 @@ import trimesh
 import pyvistaqt
 import pyvista as p_v
 from isolate_finger import load_teilmeshe_mit_textur, isolate_finger
-from draw_area_on_scan_experimental import draw_main
+from draw_area_on_scan_experimental import draw_main, save_drawn_area
 from heatmap import heatmap_main
 import numpy as np
 from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton
@@ -69,7 +69,10 @@ class HauptFenster(QMainWindow):
         self.aktueller_ordner = None
         self.isolieren_ablauf = None
         self.automatisch_modus_aktiv = False
-
+        self.zeichnungs_status = {
+            "flaeche": None,
+            "landmarken": None
+            }
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
         haupt_layout = QHBoxLayout(zentral_widget)
@@ -246,16 +249,35 @@ class HauptFenster(QMainWindow):
             self.haupt_buttons_container.setVisible(True)
 
     def zeichnen_klick(self):
+        
         self.haupt_buttons_container.setVisible(False)
         self.malen_wahl_container.setVisible(True)
         self.button_weiter_malen.setVisible(True)
+
+        draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
-        draw_main(str(self.aktueller_ordner), self.plotter)   # Parameter an deine echte Signatur anpassen
+        self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)   # Parameter an deine echte Signatur anpassen
+        
 
     def weiter_klick_malen(self):
-        pass
+        if self.zeichnungs_status["flaeche"] is None:
+            self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
+            return
+
+        save_drawn_area(
+            self.zeichnungs_status["flaeche"],
+            Path(self.aktueller_ordner),
+            "grün",
+            self.zeichnungs_status["landmarken"]
+        )
+
+        self.plotter.clear()
+        self.lade_und_zeige(Path(self.aktueller_ordner))
+
+        self.malen_wahl_container.setVisible(False)
+        self.haupt_buttons_container.setVisible(True)
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
