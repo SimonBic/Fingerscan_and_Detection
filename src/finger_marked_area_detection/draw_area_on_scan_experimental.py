@@ -100,7 +100,7 @@ def save_drawn_area(area, original_folder, farbenname, landmarken):
     
     print(f"Erfolgreich gespeichert unter dem Pfad: {save_path}")
 
-    return save_path.parent
+    return save_path
 
 
 def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starten):
@@ -235,6 +235,7 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
 
         if abstand < 5:
             geschlossene_punkte = np.vstack([punkte, punkte[0]])
+            status["punkte_eingezeichnet"] = geschlossene_punkte
             linien = np.arange(len(geschlossene_punkte))
             faces = np.hstack([[len(linien)], linien])
 

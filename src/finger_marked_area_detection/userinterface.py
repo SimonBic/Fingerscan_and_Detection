@@ -71,8 +71,11 @@ class HauptFenster(QMainWindow):
         self.automatisch_modus_aktiv = False
         self.zeichnungs_status = {
             "flaeche": None,
-            "landmarken": None
+            "landmarken": None,
+            "punkte_eingezeichnet": None
             }
+        self.path_zeichnung = None
+
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
         haupt_layout = QHBoxLayout(zentral_widget)
@@ -132,6 +135,36 @@ class HauptFenster(QMainWindow):
 
         self.knopf_layout.addWidget(self.malen_wahl_container)
         self.malen_wahl_container.setVisible(False)        
+
+        self.farbe_wahl_container = QWidget()
+        farbe_wahl_layout = QVBoxLayout(self.farbe_wahl_container)
+
+        self.button_rot= QPushButton("Untersuchung 1 \nrot")
+        self.button_orange= QPushButton("Untersuchung 2 \norange")
+        self.button_gelb= QPushButton("Untersuchung 1 \ngelb")
+        self.button_gruen= QPushButton("Untersuchung 1 \ngrün")
+        self.button_blau= QPushButton("Untersuchung 1 \nblau")
+
+        self.button_rot.setFixedSize(192, 108)
+        self.button_orange.setFixedSize(192, 108)
+        self.button_gelb.setFixedSize(192, 108)
+        self.button_gruen.setFixedSize(192, 108)
+        self.button_blau.setFixedSize(192, 108)
+
+        farbe_wahl_layout.addWidget(self.button_rot)
+        farbe_wahl_layout.addWidget(self.button_orange)
+        farbe_wahl_layout.addWidget(self.button_gelb)
+        farbe_wahl_layout.addWidget(self.button_gruen)
+        farbe_wahl_layout.addWidget(self.button_blau)
+
+        self.button_rot.clicked.connect(lambda:self.farbenwahl("rot"))
+        self.button_orange.clicked.connect(lambda:self.farbenwahl("orange"))
+        self.button_gelb.clicked.connect(lambda:self.farbenwahl("gelb"))
+        self.button_gruen.clicked.connect(lambda:self.farbenwahl("grün"))
+        self.button_blau.clicked.connect(lambda:self.farbenwahl("blau"))
+
+        self.knopf_layout.addWidget(self.farbe_wahl_container)
+        self.farbe_wahl_container.setVisible(False)
 
         haupt_layout.addWidget(self.knopf_spalte, stretch=1)     
 
@@ -254,11 +287,20 @@ class HauptFenster(QMainWindow):
         self.malen_wahl_container.setVisible(True)
         self.button_weiter_malen.setVisible(True)
 
-        draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
         if self.aktueller_ordner is None:
-            self.hinweis_label.setText("Erst einen Scan laden!")
-            return
-        self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)   # Parameter an deine echte Signatur anpassen
+                    self.hinweis_label.setText("Erst einen Scan laden!")
+                    return
+
+        self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
+
+
+    def berechne_flaeche_und_umfang(self, flaeche: p_v.PolyData, punkte: np.ndarray) -> tuple[float, float]:
+        flaecheninhalt = flaeche.area
+
+        geschlossen = np.vstack([punkte, punkte[0]])
+        umfang = np.linalg.norm(np.diff(geschlossen, axis=0), axis=1).sum()
+
+        return flaecheninhalt, umfang
         
 
     def weiter_klick_malen(self):
@@ -266,17 +308,34 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
             return
 
+        flaecheninhalt, umfang = self.berechne_flaeche_und_umfang(
+            self.zeichnungs_status["flaeche"], 
+            self.zeichnungs_status["punkte_eingezeichnet"])
+        self.hinweis_label.setText(f"Fläche: {flaecheninhalt:.1f} mm² | Umfang: {umfang:.1f} mm")
+
+        self.malen_wahl_container.setVisible(False)
+        self.haupt_buttons_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(True)
+
+
+    def farbenwahl(self, farbe: str):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Kein Scan geladen.")
+            return
+        elif self.zeichnungs_status["flaeche"] is None:
+            self.hinweis_label.setText("Noch keine Fläche gezeichnet")
+            return
+        
         save_drawn_area(
             self.zeichnungs_status["flaeche"],
             Path(self.aktueller_ordner),
-            "grün",
+            farbe,
             self.zeichnungs_status["landmarken"]
         )
 
         self.plotter.clear()
         self.lade_und_zeige(Path(self.aktueller_ordner))
-
-        self.malen_wahl_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
 
     def heatmap_klick(self):
