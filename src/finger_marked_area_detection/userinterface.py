@@ -75,6 +75,8 @@ class HauptFenster(QMainWindow):
             "punkte_eingezeichnet": None
             }
         self.path_zeichnung = None
+        self.aktuelle_teile = None
+        self.vermessen_modus_aktiv = False
 
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
@@ -96,6 +98,11 @@ class HauptFenster(QMainWindow):
         self.button_zeichnen.setFixedSize(192, 108)
         self.button_zeichnen.clicked.connect(self.zeichnen_klick)
         haupt_buttons_layout.addWidget(self.button_zeichnen)
+
+        self.button_vermessen = QPushButton("Bereich / Strecke \nvermessen")
+        self.button_vermessen.setFixedSize(192, 108)
+        self.button_vermessen.clicked.connect(self.vermessen_klick)
+        haupt_buttons_layout.addWidget(self.button_vermessen)
 
         self.button_heatmap = QPushButton("Heatmap erzeugen")
         self.button_heatmap.setFixedSize(192, 108)
@@ -166,6 +173,34 @@ class HauptFenster(QMainWindow):
         self.knopf_layout.addWidget(self.farbe_wahl_container)
         self.farbe_wahl_container.setVisible(False)
 
+
+        self.vermessung_wahl_container = QWidget()
+        vermessung_wahl_layout = QVBoxLayout(self.vermessung_wahl_container)
+
+        self.button_vermessen_weiter = QPushButton("Eingezeichneten \nBereich / Umfang \nvermessen")
+        self.button_Strecke_vermessen = QPushButton("Eingezeichnete \nStrecke vermessen")
+
+        self.button_vermessen_weiter.setFixedSize(192, 108)
+        self.button_Strecke_vermessen.setFixedSize(192, 108)
+
+        self.button_vermessen_weiter.clicked.connect(self.bereich_vermessen_start)
+        self.button_Strecke_vermessen.clicked.connect(self.strecke_messen_klick)
+
+        vermessung_wahl_layout.addWidget(self.button_vermessen_weiter)
+        vermessung_wahl_layout.addWidget(self.button_Strecke_vermessen)
+
+        self.knopf_layout.addWidget(self.vermessung_wahl_container)
+        self.vermessung_wahl_container.setVisible(False)
+
+        self.navigatecontainer = QWidget()
+        navigate_layout = QVBoxLayout(self.navigatecontainer)
+        self.button_main_menu = QPushButton("Zurück zum Hauptmenü")
+        self.button_main_menu.setFixedSize(192, 108)
+        self.button_main_menu.clicked.connect(self.lade_main_menu)
+        navigate_layout.addWidget(self.button_main_menu)
+        self.knopf_layout.addWidget(self.navigatecontainer)
+        self.navigatecontainer.setVisible(False)
+
         haupt_layout.addWidget(self.knopf_spalte, stretch=1)     
 
         self.viewer_spalte = QWidget()
@@ -210,7 +245,9 @@ class HauptFenster(QMainWindow):
         except Exception as e:
             self.hinweis_label.setText(f"Fehler beim Laden (ui, lade_und_zeige): {e}")
             return
- 
+
+        self.aktuelle_teile = teile
+        self.aktuelles_hand_mesh = p_v.merge([teil for teil, tex in teile])
         self.plotter.clear()
 
         for pv_mesh, tex in teile:          
@@ -220,18 +257,41 @@ class HauptFenster(QMainWindow):
  
         self.hinweis_label.setText(f"Geladen: {ordner.name}")
 
+
+    def zeige_basis_mesh_neu(self):
+        self.plotter.clear()
+        for pv_mesh, tex in self.aktuelle_teile:
+            self.plotter.add_mesh(pv_mesh, texture=tex)
+
+
+    def lade_main_menu(self):
+        self.haupt_buttons_container.setVisible(True)
+        self.isolieren_wahl_container.setVisible(False)
+        self.malen_wahl_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(False)
+        self.vermessung_wahl_container.setVisible(False)
+        self.navigatecontainer.setVisible(False)
+        self.plotter.clear()
+        self.lade_und_zeige(Path(self.aktueller_ordner))
+        self.zeige_basis_mesh_neu()
+        self.plotter.disable_picking()
+
     def isolieren_klick(self):
+        if self.aktueller_ordner is None:
+                    self.hinweis_label.setText("Erst einen Scan laden")
+                    return
+        self.zeige_basis_mesh_neu()
         self.button_automatisch.setVisible(True)   
         self.button_manuell.setVisible(True)   
-        if self.aktueller_ordner is None:
-            self.hinweis_label.setText("Erst einen Scan laden!")
-            return
         self.isolieren_wahl_container.setVisible(True)
         self.haupt_buttons_container.setVisible(False)
+        self.navigatecontainer.setVisible(True)
 
     def automatisch_klick(self):
+        self.zeige_basis_mesh_neu()
         self.button_automatisch.setVisible(False)   
-        self.button_manuell.setVisible(False)         
+        self.button_manuell.setVisible(False)    
+        self.navigatecontainer.setVisible(True)     
         ordner = Path(self.aktueller_ordner)
         gespeichert = lade_isolate_finger_parameter(ordner)
 
@@ -250,9 +310,11 @@ class HauptFenster(QMainWindow):
         ordner = Path(self.aktueller_ordner)
         self.isolieren_ablauf = isolate_finger(str(ordner), plotter = self.plotter, zeige_zwischenschritte=True)
         self.button_weiter.setVisible(True)
+        self.navigatecontainer.setVisible(True)
         next(self.isolieren_ablauf)
 
     def weiter_klick(self):
+        self.navigatecontainer.setVisible(False)
         if getattr(self, "automatisch_modus_aktiv", False):
             # Nutzer hat gerade 2 Punkte geklickt und "Fertig markiert" gedrueckt
             self.automatisch_modus_aktiv = False
@@ -282,14 +344,14 @@ class HauptFenster(QMainWindow):
             self.haupt_buttons_container.setVisible(True)
 
     def zeichnen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
         
+        self.navigatecontainer.setVisible(True)
         self.haupt_buttons_container.setVisible(False)
         self.malen_wahl_container.setVisible(True)
         self.button_weiter_malen.setVisible(True)
-
-        if self.aktueller_ordner is None:
-                    self.hinweis_label.setText("Erst einen Scan laden!")
-                    return
 
         self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
 
@@ -309,13 +371,20 @@ class HauptFenster(QMainWindow):
             return
 
         flaecheninhalt, umfang = self.berechne_flaeche_und_umfang(
-            self.zeichnungs_status["flaeche"], 
-            self.zeichnungs_status["punkte_eingezeichnet"])
+            self.zeichnungs_status["flaeche"],
+            self.zeichnungs_status["punkte_eingezeichnet"]
+        )
         self.hinweis_label.setText(f"Fläche: {flaecheninhalt:.1f} mm² | Umfang: {umfang:.1f} mm")
-
         self.malen_wahl_container.setVisible(False)
-        self.haupt_buttons_container.setVisible(False)
-        self.farbe_wahl_container.setVisible(True)
+
+        if self.vermessen_modus_aktiv:
+            self.vermessen_modus_aktiv = False
+            self.haupt_buttons_container.setVisible(True)   
+            self.navigatecontainer.setVisible(False)
+        else:
+            self.haupt_buttons_container.setVisible(False)
+            self.farbe_wahl_container.setVisible(True) 
+            self.navigatecontainer.setVisible(True)
 
 
     def farbenwahl(self, farbe: str):
@@ -337,13 +406,63 @@ class HauptFenster(QMainWindow):
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.farbe_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
+        self.navigatecontainer.setVisible(False)
+
+    def bereich_vermessen_start(self):
+        if self.aktueller_ordner is None:
+                    self.hinweis_label.setText("Erst einen Scan laden!")
+                    return
+        self.zeige_basis_mesh_neu()
+        self.vermessung_wahl_container.setVisible(False)
+        self.malen_wahl_container.setVisible(True)
+        self.vermessen_modus_aktiv = True
+        self.button_weiter_malen.setVisible(True)
+        self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status) 
+        self.navigatecontainer.setVisible(True)
+
+
+    def vermessen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        self.haupt_buttons_container.setVisible(False)
+        self.vermessung_wahl_container.setVisible(True)
+        self.navigatecontainer.setVisible(True)
+        
+    def strecke_messen_klick(self):
+        self.zeige_basis_mesh_neu()
+        self.plotter.disable_picking()
+        self.vermessung_wahl_container.setVisible(False)
+        self.navigatecontainer.setVisible(True)
+        self.hinweis_label.setText("2x rechtsklicken: Start- und Endpunkt der Strecke.")
+
+        hand_mesh = self.aktuelles_hand_mesh   
+        punkte_indices = []
+
+        def punkt_geklickt(punkt, picker):
+            punkte_indices.append(hand_mesh.find_closest_point(punkt))
+            if len(punkte_indices) == 2:
+                self.plotter.disable_picking()
+                pfad = hand_mesh.geodesic(punkte_indices[0], punkte_indices[1])
+                distanz = np.linalg.norm(np.diff(pfad.points, axis=0), axis=1).sum()
+                self.hinweis_label.setText(f"Strecke auf der Oberfläche: {distanz:.1f} mm")
+                self.navigatecontainer.setVisible(False)
+                self.haupt_buttons_container.setVisible(True)
+
+        self.plotter.enable_point_picking(
+            callback=punkt_geklickt, 
+            use_picker=True, 
+            show_point=True, 
+            color="red", 
+            point_size=20
+        )
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
         heatmap_main(str(self.aktueller_ordner))   # Parameter an deine echte Signatur anpassen
- 
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
