@@ -237,6 +237,14 @@ class HauptFenster(QMainWindow):
         ordner = pfad.parent if pfad.is_file() else pfad
 
         self.lade_und_zeige(ordner)
+
+
+    def zeige_koordinatensystem(self):
+        achsen_actor = self.plotter.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
+        achsen_actor.SetTotalLength(1000, 1000, 1000)
+        self.plotter.reset_camera()
+        print("Mesh-Bounds:", self.plotter.bounds)
+
  
     def lade_und_zeige(self, ordner: Path):
         print("DEBUG - lade_und_zeige bekommt Ordner:", ordner, "| ist Ordner?", ordner.is_dir())
@@ -255,8 +263,8 @@ class HauptFenster(QMainWindow):
         for pv_mesh, tex in teile:          
             self.plotter.add_mesh(pv_mesh, texture=tex)
 
+        #self.zeige_koordinatensystem()
         self.plotter.reset_camera()
- 
         self.hinweis_label.setText(f"Geladen: {ordner.name}")
 
 

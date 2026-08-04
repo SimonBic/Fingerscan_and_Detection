@@ -248,6 +248,27 @@ def erstelle_schnitt_ellipsoid(
     return basis_ellipsoid.transform(transform, inplace = False)
 
 
+def berechne_finale_ausrichtung(normale: np.ndarray, achsen_punkt: np.ndarray, kerben_punkt: np.ndarray) -> np.ndarray:
+    R1 = rotationsmatrix_a_nach_b(normale, np.array([0, 0, 1.0]))
+    achsen_punkt_rot = R1 @ achsen_punkt
+    kerben_punkt_rot = R1 @ kerben_punkt
+
+    naechster_punkt = np.array([achsen_punkt_rot[0], achsen_punkt_rot[1], kerben_punkt_rot[2]])
+    kerben_verschoben = kerben_punkt_rot - naechster_punkt
+
+    theta = np.arctan2(kerben_verschoben[1], kerben_verschoben[0])
+    c, s = np.cos(-theta), np.sin(-theta)
+    R3 = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+    R_gesamt = R3 @ R1
+    verschiebung = -R3 @ naechster_punkt
+
+    transform = np.eye(4)
+    transform[:3, :3] = R_gesamt
+    transform[:3, 3] = verschiebung
+    return transform
+
+
 def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: list) -> Path:
     scan_ordner = Path(scan_ordner_pfad)
     originale_scans_ordner = scan_ordner.parent
@@ -417,10 +438,27 @@ def isolate_finger(path: str,
     #Cutten
     finger_isoliert = hand_ausgerichtet.clip_surface(ellipsoid, invert = False)
     texture_teile_isoliert = clippe_teile(texture_teile, ellipsoid)
+
+    #Finale Ausrichtung: Fingerachse -> Z-Achse, Kerbenpunkt -> +X-Achse
+    finale_transform = berechne_finale_ausrichtung(normale, avg_point_of_hurt_finger, tiefster_punkt)
+    texture_teile_isoliert = transformiere_teile(texture_teile_isoliert, finale_transform)
+
     if plotter is not None:
         plotter.clear()
         zeige_mit_texturen(plotter, texture_teile_isoliert)
+
+        if zeige_zwischenschritte:
+            kerben_punkt_transformiert = finale_transform[:3, :3] @ tiefster_punkt + finale_transform[:3, 3]
+            debug_kugel = p_v.Sphere(radius=hand_ausgerichtet.length * 0.015, center=kerben_punkt_transformiert)
+            plotter.add_mesh(debug_kugel, color="magenta")
+
+            achsen_actor = plotter.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
+            achsen_actor.SetTotalLength(300, 300, 300)
+
         plotter.reset_camera()
+
+        if zeige_zwischenschritte:
+            yield
     else:
         iso_finger_plotter = p_v.Plotter()
         zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
