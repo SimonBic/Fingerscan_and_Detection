@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QW
 from PySide6.QtCore import Qt
 from pyvistaqt import QtInteractor
 from pathlib import Path
+from theme import QSS
 
 def isolate_finger_parameter_datei_pfad(scan_ordner: Path) -> Path:
         #Pfad zur Parameterdatei, siehe Ordnerstruktur.pdf (Update ich bald)
@@ -210,7 +211,8 @@ class HauptFenster(QMainWindow):
         self.hinweis_label.setAlignment(Qt.AlignCenter)
         viewer_layout.addWidget(self.hinweis_label)
 
-        self.plotter = QtInteractor(self.viewer_spalte)                     
+        self.plotter = QtInteractor(self.viewer_spalte)
+        self.plotter.set_background("F5F7FA")                  
         viewer_layout.addWidget(self.plotter.interactor)               
 
         haupt_layout.addWidget(self.viewer_spalte, stretch = 4)  
@@ -466,6 +468,7 @@ class HauptFenster(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setStyleSheet(QSS)
     fenster = HauptFenster()
     fenster.show()
     sys.exit(app.exec())
