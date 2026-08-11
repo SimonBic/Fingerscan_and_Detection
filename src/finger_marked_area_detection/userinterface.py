@@ -11,8 +11,19 @@ from isolate_finger import load_teilmeshe_mit_textur, isolate_finger
 from draw_area_on_scan_experimental import draw_main, save_drawn_area
 from heatmap import heatmap_main
 import numpy as np
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QSlider
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QMainWindow, 
+    QApplication, 
+    QLabel, 
+    QVBoxLayout, 
+    QWidget, 
+    QHBoxLayout, 
+    QPushButton, 
+    QSlider, 
+    QTreeView, 
+    QFileSystemModel, 
+    QLineEdit)
+from PySide6.QtCore import QDir, Qt
 from pyvistaqt import QtInteractor
 from pathlib import Path
 from theme import QSS
@@ -243,7 +254,29 @@ class HauptFenster(QMainWindow):
         self.knopf_layout.addWidget(self.navigatecontainer)
         self.navigatecontainer.setVisible(False)
 
-        haupt_layout.addWidget(self.knopf_spalte, stretch=1)     
+        aussen_spalte = QWidget()
+        aussen_layout = QVBoxLayout(aussen_spalte)
+        aussen_layout.addWidget(self.knopf_spalte, stretch=2)   
+        self.ordner_browser_widget = QWidget()
+        browser_layout = QVBoxLayout(self.ordner_browser_widget)
+
+        self.pfad_eingabe = QLineEdit()
+        self.pfad_eingabe.setPlaceholderText("Pfad zum Scan-Ordner bitte hier eingeben")
+        self.pfad_eingabe.returnPressed.connect(self.pfad_geladen)
+        browser_layout.addWidget(self.pfad_eingabe)
+
+        self.ordner_baum = QTreeView()
+        self.dateisystem_modell = QFileSystemModel()
+        self.dateisystem_modell.setFilter(QDir.Dirs | QDir.NoDotAndDotDot)
+        self.ordner_baum.setModel(self.dateisystem_modell)
+        for spalte in range(1, 4):
+            self.ordner_baum.hideColumn(spalte)   
+        self.ordner_baum.clicked.connect(self.baum_klick)
+        browser_layout.addWidget(self.ordner_baum)
+
+        aussen_layout.addWidget(self.ordner_browser_widget, stretch=1)  
+
+        haupt_layout.addWidget(aussen_spalte, stretch=1)     
 
         self.viewer_spalte = QWidget()
         viewer_layout = QVBoxLayout(self.viewer_spalte)
@@ -278,6 +311,22 @@ class HauptFenster(QMainWindow):
         ordner = pfad.parent if pfad.is_file() else pfad
 
         self.lade_und_zeige(ordner)
+
+
+    def pfad_geladen(self):
+        pfad = self.pfad_eingabe.text().strip()
+        if not Path(pfad).is_dir():
+            self.hinweis_label.setText("Pfad existiert nicht oder ist kein Ordner.")
+            return
+        self.dateisystem_modell.setRootPath(pfad)
+        self.ordner_baum.setRootIndex(self.dateisystem_modell.index(pfad))
+
+
+    def baum_klick(self, index):
+        pfad = Path(self.dateisystem_modell.filePath(index))
+        if list(pfad.glob("*.obj")):
+            self.aktueller_ordner = str(pfad)
+            self.lade_und_zeige(pfad)
 
 
     def zeige_koordinatensystem(self):
