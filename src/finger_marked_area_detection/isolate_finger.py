@@ -357,62 +357,46 @@ def isolate_finger(path: str,
     print(f"Finger des benachbarten Fingers: {second_finger}")
 
     
+    
     #Handausrichten
     hand_ausgerichtet, hurt_finger, second_finger, transformierungsmatrix = richte_hand_aus(hand_mesh, hurt_finger, second_finger)
     texture_teile = transformiere_teile(texture_teile, transformierungsmatrix) 
 
-    #Hand zeigen (für Testzwecke)
-    if zeige_zwischenschritte:
-        if plotter is not None:
-            plotter.clear()
-            zeige_mit_texturen(plotter, texture_teile)
-            plotter.reset_camera()
-            yield #Macht die Funktion zu einem Generator
-        else:
-            plotter_ausgerichtete_hand = p_v.Plotter()
-            zeige_mit_texturen(plotter_ausgerichtete_hand, texture_teile)
-            achsen_actor = plotter_ausgerichtete_hand.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
-            achsen_actor.SetTotalLength(300, 300, 300)
-            plotter_ausgerichtete_hand.show()
-    
-    #Djikstra & gleichzeitig tiefster Punkt
+    #Djikstra & gleichzeitig tiefster Punkt (still, kein Zwischenschritt mehr)
     tiefster_punkt, pfad_mesh, kugel = djikstra_und_tiefster_punkt(hand_ausgerichtet, hurt_finger, second_finger)
-    #Handzeigen (für Testzwecke wieder):
-    if zeige_zwischenschritte:
-        if plotter is not None:
-            plotter.clear()
-            zeige_mit_texturen(plotter, texture_teile)
-            plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)
-            plotter.add_mesh(kugel, color="red")
-            plotter.reset_camera()  
-            yield
-        else:
-            djikstra_plotter = p_v.Plotter()
-            zeige_mit_texturen(djikstra_plotter, texture_teile)
-            djikstra_plotter.add_mesh(pfad_mesh, color="yellow", line_width=20)   # der Pfad selbst
-            djikstra_plotter.add_mesh(kugel, color="red")  
-            djikstra_plotter.show()
-    
-    #Normale mit PCA (Principal Comonent Analysis bestimmen)
-    normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(hand_ausgerichtet, hurt_finger, 3000)
-    pfeil_normale = p_v.Arrow(start = avg_point_of_hurt_finger, direction=normale, scale=50) 
-    #Hand wieder zeigen zum debuggen:
-    if zeige_zwischenschritte:
-        if plotter is not None:
-            plotter.clear()
-            zeige_mit_texturen(plotter, texture_teile)
-            plotter.add_points(verwendete_vertices, color="orange", point_size=6)
-            plotter.add_mesh(pfeil_normale, color="red")
-            plotter.reset_camera()
-            yield
-        else:
-            normalen_plotter = p_v.Plotter()
-            zeige_mit_texturen(normalen_plotter, texture_teile)
-            normalen_plotter.add_points(verwendete_vertices, color="orange", point_size=6)
-            normalen_plotter.add_mesh(pfeil_normale, color="red")
-            normalen_plotter.show()
 
-    #Schnittellipsoid bestimmen
+    #Normale mit PCA (still, kein Zwischenschritt mehr)
+    normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(hand_ausgerichtet, hurt_finger, 3000)
+
+    #Einziger verbleibender Zwischenschritt: Ellipsoid live einstellbar.
+    if zeige_zwischenschritte and plotter is not None:
+        plotter.clear()
+        zeige_mit_texturen(plotter, texture_teile)
+        plotter.reset_camera()
+
+
+        empfangene_werte = yield {
+            "avg_point_of_hurt_finger": avg_point_of_hurt_finger,
+            "normale": normale,
+            "verwendete_vertices": verwendete_vertices,
+            "tiefster_punkt": tiefster_punkt,
+        }
+        if empfangene_werte is not None:
+            radius_faktor = empfangene_werte.get("radius_faktor", radius_faktor)
+            laengen_faktor = empfangene_werte.get("laengen_faktor", laengen_faktor)
+            unterschreitung = empfangene_werte.get("unterschreitung", unterschreitung)
+
+    elif zeige_zwischenschritte:
+        ellipsoid_vorschau = erstelle_schnitt_ellipsoid(
+            avg_point_of_hurt_finger, normale, verwendete_vertices, tiefster_punkt,
+            radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung
+        )
+        ellipsoid_plotter = p_v.Plotter()
+        zeige_mit_texturen(ellipsoid_plotter, texture_teile)
+        ellipsoid_plotter.add_mesh(ellipsoid_vorschau, color="cyan", opacity=0.3)
+        ellipsoid_plotter.show()
+
+    #Schnittellipsoid bestimmen (mit den finalen, evtl. per Slider angepassten Parametern)
     ellipsoid = erstelle_schnitt_ellipsoid(
         avg_point_of_hurt_finger, 
         normale, 
@@ -421,19 +405,6 @@ def isolate_finger(path: str,
         radius_faktor = radius_faktor,
         laengen_faktor = laengen_faktor,
         unterschreitung = unterschreitung)
-    #zeigen, zum debuggen
-    if zeige_zwischenschritte:
-        if plotter is not None:
-            plotter.clear()
-            zeige_mit_texturen(plotter, texture_teile)
-            plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)          
-            plotter.reset_camera()  
-            yield    
-        else:
-            ellipsoid_plotter = p_v.Plotter()
-            zeige_mit_texturen(ellipsoid_plotter, texture_teile)
-            ellipsoid_plotter.add_mesh(ellipsoid, color = "cyan", opacity = 0.3)
-            ellipsoid_plotter.show()
 
     #Cutten
     finger_isoliert = hand_ausgerichtet.clip_surface(ellipsoid, invert = False)
@@ -446,25 +417,12 @@ def isolate_finger(path: str,
     if plotter is not None:
         plotter.clear()
         zeige_mit_texturen(plotter, texture_teile_isoliert)
-
-        if zeige_zwischenschritte:
-            kerben_punkt_transformiert = finale_transform[:3, :3] @ tiefster_punkt + finale_transform[:3, 3]
-            debug_kugel = p_v.Sphere(radius=hand_ausgerichtet.length * 0.015, center=kerben_punkt_transformiert)
-            plotter.add_mesh(debug_kugel, color="magenta")
-
-            achsen_actor = plotter.add_axes_at_origin(x_color="red", y_color="green", z_color="blue")
-            achsen_actor.SetTotalLength(300, 300, 300)
-
         plotter.reset_camera()
-
-        if zeige_zwischenschritte:
-            yield
     else:
         iso_finger_plotter = p_v.Plotter()
         zeige_mit_texturen(iso_finger_plotter, texture_teile_isoliert)
         iso_finger_plotter.show()
 
-    
     #Finger speichern
     markierungsordner = speichere_isolierten_finger(path, texture_teile_isoliert)
 

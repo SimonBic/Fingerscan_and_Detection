@@ -11,7 +11,7 @@ from isolate_finger import load_teilmeshe_mit_textur, isolate_finger
 from draw_area_on_scan_experimental import draw_main, save_drawn_area
 from heatmap import heatmap_main
 import numpy as np
-from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout, QPushButton, QSlider
 from PySide6.QtCore import Qt
 from pyvistaqt import QtInteractor
 from pathlib import Path
@@ -45,6 +45,7 @@ def speichere_isolate_finger_parameter(
             unterschreitung: float) -> Path:
     
     pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
     pfad.write_text(
         f"radius_faktor={radius_faktor}\n"
         f"laengen_faktor={laengen_faktor}\n"
@@ -78,6 +79,9 @@ class HauptFenster(QMainWindow):
         self.path_zeichnung = None
         self.aktuelle_teile = None
         self.vermessen_modus_aktiv = False
+        self.ellipsoid_kontext = None
+        self.aktueller_ellipsoid_actor = None
+        self.isolieren_phase = None
 
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
@@ -122,7 +126,44 @@ class HauptFenster(QMainWindow):
 
         self.button_manuell = QPushButton("Selbst justieren")
         self.button_manuell.setFixedSize(192, 108)
+        self.button_manuell.clicked.connect(self.manuell_klick)
         wahl_layout.addWidget(self.button_manuell)
+
+        self.ellipsoid_einstellen_container = QWidget()
+        ellipsoid_layout = QVBoxLayout(self.ellipsoid_einstellen_container)
+
+        self.label_radius = QLabel("Breite: 2.00")
+        self.slider_radius = QSlider(Qt.Horizontal)
+        self.slider_radius.setRange(100, 400)   
+        self.slider_radius.setValue(200)     
+        ellipsoid_layout.addWidget(self.label_radius)
+        ellipsoid_layout.addWidget(self.slider_radius)
+
+        self.label_laenge = QLabel("Länge: 0.80")
+        self.slider_laenge = QSlider(Qt.Horizontal)
+        self.slider_laenge.setRange(30, 150)   
+        self.slider_laenge.setValue(80)
+        ellipsoid_layout.addWidget(self.label_laenge)
+        ellipsoid_layout.addWidget(self.slider_laenge)
+
+        self.label_unterschreitung = QLabel("Unterschreitung: 0.45")
+        self.slider_unterschreitung = QSlider(Qt.Horizontal)
+        self.slider_unterschreitung.setRange(0, 100)   
+        self.slider_unterschreitung.setValue(45)
+        ellipsoid_layout.addWidget(self.label_unterschreitung)
+        ellipsoid_layout.addWidget(self.slider_unterschreitung)
+
+        self.slider_radius.valueChanged.connect(self.aktualisiere_ellipsoid_vorschau)
+        self.slider_laenge.valueChanged.connect(self.aktualisiere_ellipsoid_vorschau)
+        self.slider_unterschreitung.valueChanged.connect(self.aktualisiere_ellipsoid_vorschau)
+
+        self.button_ellipsoid_bestaetigen = QPushButton("Bestätigen")
+        self.button_ellipsoid_bestaetigen.setFixedSize(192, 108)
+        self.button_ellipsoid_bestaetigen.clicked.connect(self.ellipsoid_bestaetigen_klick)
+        ellipsoid_layout.addWidget(self.button_ellipsoid_bestaetigen)
+
+        self.knopf_layout.addWidget(self.ellipsoid_einstellen_container)
+        self.ellipsoid_einstellen_container.setVisible(False)
 
         self.button_weiter = QPushButton("Weiter")
         self.button_weiter.setFixedSize(192, 108)
@@ -317,8 +358,11 @@ class HauptFenster(QMainWindow):
         next(self.isolieren_ablauf) 
 
     def manuell_klick(self):
+        self.button_automatisch.setVisible(False)   
+        self.button_manuell.setVisible(False) 
         ordner = Path(self.aktueller_ordner)
         self.isolieren_ablauf = isolate_finger(str(ordner), plotter = self.plotter, zeige_zwischenschritte=True)
+        self.isolieren_phase = "picking"
         self.button_weiter.setVisible(True)
         self.navigatecontainer.setVisible(True)
         next(self.isolieren_ablauf)
@@ -326,13 +370,13 @@ class HauptFenster(QMainWindow):
     def weiter_klick(self):
         self.navigatecontainer.setVisible(False)
         if getattr(self, "automatisch_modus_aktiv", False):
-            # Nutzer hat gerade 2 Punkte geklickt und "Fertig markiert" gedrueckt
+            
             self.automatisch_modus_aktiv = False
             self.button_weiter.setText("Weiter")
             self.button_weiter.setVisible(False)
 
             try:
-                gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)  # Rest jetzt automatisch
+                gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)  
                 self.aktueller_ordner = Path(gespeicherter_obj_pfad)
             except Exception as e:
                 self.hinweis_label.setText(f"Fehler: {e}")
@@ -345,13 +389,72 @@ class HauptFenster(QMainWindow):
             self.lade_und_zeige(Path(gespeicherter_obj_pfad))   
             return
 
-        # bisheriger "manuell"-Ablauf bleibt unveraendert
+        if getattr(self, "isolieren_phase", None) == "picking":  
+            self.isolieren_phase = "ellipsoid"
+            self.button_weiter.setVisible(False)
+            self.ellipsoid_kontext = next(self.isolieren_ablauf)  
+            self.ellipsoid_einstellen_container.setVisible(True)
+            self.aktualisiere_ellipsoid_vorschau()
+            return
+
         try:
             next(self.isolieren_ablauf)
         except StopIteration:
             self.button_weiter.setVisible(False)
             self.isolieren_wahl_container.setVisible(False)
             self.haupt_buttons_container.setVisible(True)
+
+
+    def aktualisiere_ellipsoid_vorschau(self):
+        from isolate_finger import erstelle_schnitt_ellipsoid
+
+        if self.aktueller_ellipsoid_actor is not None:
+            self.plotter.remove_actor(self.aktueller_ellipsoid_actor, reset_camera=False)
+
+        radius_faktor = self.slider_radius.value() / 100
+        laengen_faktor = self.slider_laenge.value() / 100
+        unterschreitung = self.slider_unterschreitung.value() / 100
+
+        self.label_radius.setText(f"Breite: {radius_faktor:.2f}")
+        self.label_laenge.setText(f"Länge: {laengen_faktor:.2f}")
+        self.label_unterschreitung.setText(f"Unterschreitung: {unterschreitung:.2f}")
+
+        ellipsoid = erstelle_schnitt_ellipsoid(
+            self.ellipsoid_kontext["avg_point_of_hurt_finger"],
+            self.ellipsoid_kontext["normale"],
+            self.ellipsoid_kontext["verwendete_vertices"],
+            self.ellipsoid_kontext["tiefster_punkt"],
+            radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung,
+        )
+        self.aktueller_ellipsoid_actor = self.plotter.add_mesh(ellipsoid, color="darkcyan", opacity=0.3)
+        self.plotter.render()   
+
+
+    def ellipsoid_bestaetigen_klick(self):
+        werte = {
+            "radius_faktor": self.slider_radius.value() / 100,
+            "laengen_faktor": self.slider_laenge.value() / 100,
+            "unterschreitung": self.slider_unterschreitung.value() / 100,
+        }
+        ordner = Path(self.aktueller_ordner)
+        self.ellipsoid_einstellen_container.setVisible(False)
+        self.navigatecontainer.setVisible(False)          
+
+        speichere_isolate_finger_parameter(ordner, **werte)
+
+        try:
+            self.isolieren_ablauf.send(werte)
+            self.hinweis_label.setText("Unerwarteter weiterer Zwischenschritt - bitte melden.")
+            return
+        except StopIteration as e:
+            gespeicherter_obj_pfad = e.value
+
+        self.aktueller_ordner = Path(gespeicherter_obj_pfad)   
+        self.isolieren_phase = None
+        self.isolieren_wahl_container.setVisible(False)         
+        self.haupt_buttons_container.setVisible(True)
+        self.lade_und_zeige(Path(gespeicherter_obj_pfad))
+
 
     def zeichnen_klick(self):
         if self.aktueller_ordner is None:
