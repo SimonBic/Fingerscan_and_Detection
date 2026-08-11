@@ -11,6 +11,7 @@ from isolate_finger import load_teilmeshe_mit_textur, isolate_finger
 from draw_area_on_scan_experimental import draw_main, save_drawn_area
 from heatmap import heatmap_main
 import numpy as np
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QMainWindow, 
     QApplication, 
@@ -22,8 +23,10 @@ from PySide6.QtWidgets import (
     QSlider, 
     QTreeView, 
     QFileSystemModel, 
-    QLineEdit)
-from PySide6.QtCore import QDir, Qt
+    QLineEdit,
+    QColorDialog, 
+    QGridLayout)
+from PySide6.QtCore import QDir, Qt, QEvent
 from pyvistaqt import QtInteractor
 from pathlib import Path
 from theme import QSS
@@ -93,6 +96,7 @@ class HauptFenster(QMainWindow):
         self.ellipsoid_kontext = None
         self.aktueller_ellipsoid_actor = None
         self.isolieren_phase = None
+        self.markierungsfarbe = "#DD11ED"  
 
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
@@ -253,14 +257,77 @@ class HauptFenster(QMainWindow):
         volumen_layout = QVBoxLayout(self.volumen_container)
 
         self.button_gesamtes_volumen_berechnen = QPushButton("Gesamtes Volumen\nberechnen")
-        self.button_Finger_spitze_volumen_berechnen = QPushButton("Volumen der\nFingerspitze\nberechnen")
+        self.button_Finger_spitze_volumen_berechnen = QPushButton("Volumen über\nmarkierter Fläche\nberechnen")
+
         self.button_gesamtes_volumen_berechnen.setFixedSize(192, 108)
         self.button_gesamtes_volumen_berechnen.clicked.connect(self.volumen_ganzes_mesh_messen_klick)
         self.button_Finger_spitze_volumen_berechnen.setFixedSize(192, 108)
         self.button_Finger_spitze_volumen_berechnen.clicked.connect(self.volumen_Finger_spitze_messen_klick)
+        
+
 
         volumen_layout.addWidget(self.button_gesamtes_volumen_berechnen)
         volumen_layout.addWidget(self.button_Finger_spitze_volumen_berechnen)
+
+        self.farbvorschau = QLabel()
+        self.farbvorschau.setFixedSize(192, 40)
+        self.farbvorschau.setStyleSheet(f"background-color: {self.markierungsfarbe}; border: 2px solid #4A90D9; border-radius: 6px;")
+        volumen_layout.addWidget(self.farbvorschau)
+
+        self.slider_farbe_r = QSlider(Qt.Horizontal)
+        self.slider_farbe_r.setRange(0, 255)
+        self.slider_farbe_r.setValue(0xDD)          
+        volumen_layout.addWidget(self.slider_farbe_r)
+
+        self.slider_farbe_g = QSlider(Qt.Horizontal)
+        self.slider_farbe_g.setRange(0, 255)
+        self.slider_farbe_g.setValue(0x11)
+        volumen_layout.addWidget(self.slider_farbe_g)
+
+        self.slider_farbe_b = QSlider(Qt.Horizontal)
+        self.slider_farbe_b.setRange(0, 255)
+        self.slider_farbe_b.setValue(0xED)
+        volumen_layout.addWidget(self.slider_farbe_b)
+
+        self.slider_farbe_r.valueChanged.connect(self.aktualisiere_farbvorschau)
+        self.slider_farbe_g.valueChanged.connect(self.aktualisiere_farbvorschau)
+        self.slider_farbe_b.valueChanged.connect(self.aktualisiere_farbvorschau)
+
+        self.slider_farbe_r.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 red); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+
+        self.slider_farbe_g.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 green); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+
+        self.slider_farbe_b.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 blue); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+
+        self.button_pipette = QPushButton("Pipette (Farbe vom Scan)")
+        self.button_pipette.setFixedSize(192, 40)
+        self.button_pipette.clicked.connect(self.pipette_aktivieren)
+        volumen_layout.addWidget(self.button_pipette)
+
+        farb_grid = QGridLayout()
+        farb_grid.setSpacing(2)
+        for i, farbe in enumerate(self.erzeuge_farbpalette(50)):
+            swatch = QPushButton()
+            swatch.setFixedSize(16, 16)
+            swatch.setStyleSheet(f"background-color: {farbe}; border: 1px solid #888; border-radius: 2px;")
+            swatch.clicked.connect(lambda checked=False, f=farbe: self.setze_markierungsfarbe(f))
+            farb_grid.addWidget(swatch, i // 10, i % 10)
+        volumen_layout.addLayout(farb_grid)  
 
         self.knopf_layout.addWidget(self.volumen_container)
         self.volumen_container.setVisible(False)
@@ -391,10 +458,14 @@ class HauptFenster(QMainWindow):
         self.farbe_wahl_container.setVisible(False)
         self.vermessung_wahl_container.setVisible(False)
         self.navigatecontainer.setVisible(False)
+        self.volumen_container.setVisible(False)
         self.plotter.clear()
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.zeige_basis_mesh_neu()
         self.plotter.disable_picking()
+        self._pipette_aktiv = False                          
+        self.plotter.interactor.removeEventFilter(self)       
+        self.plotter.interactor.unsetCursor() 
 
     def isolieren_klick(self):
         if self.aktueller_ordner is None:
@@ -666,7 +737,7 @@ class HauptFenster(QMainWindow):
         return np.vstack(alle_markierten_punkte)
 
 
-    def volumen_ab_markierung(self,hand_mesh: p_v.PolyData, teile: list, hex_code: str = "#DD11ED", toleranz: float = 100.0):
+    def volumen_ab_markierung(self,hand_mesh: p_v.PolyData, teile: list, hex_code: str = "#DD11ED", toleranz: float = 40.0):
         markierte_punkte = self.finde_markierungs_punkte(teile, hex_code, toleranz)
         if len(markierte_punkte) == 0:
             raise ValueError(f"Keine Markierung mit Farbe {hex_code} gefunden.")
@@ -679,6 +750,7 @@ class HauptFenster(QMainWindow):
     def volumen_messen_klick(self):
         self.volumen_container.setVisible(True)
         self.vermessung_wahl_container.setVisible(False)
+        self.navigatecontainer.setVisible(True)
 
 
     def volumen_ganzes_mesh_messen_klick(self):
@@ -694,16 +766,81 @@ class HauptFenster(QMainWindow):
             return
         try:
             volumen, schnitt_hoehe, anzahl_markiert = self.volumen_ab_markierung(
-                self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code="#DD11ED"
+                self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code=self.markierungsfarbe
             )
         except ValueError as e:
             self.hinweis_label.setText(f"Fehler: {e}")
             return
 
+        bounds = self.aktuelles_hand_mesh.bounds
+        mitte_x = (bounds[0] + bounds[1]) / 2
+        mitte_y = (bounds[2] + bounds[3]) / 2
+        breite = (bounds[1] - bounds[0]) * 1.5
+        tiefe = (bounds[3] - bounds[2]) * 1.5
+
+        ebene = p_v.Plane(center=(mitte_x, mitte_y, schnitt_hoehe), direction=(0, 0, 1), i_size=breite, j_size=tiefe)
+        self.plotter.add_mesh(ebene, color="yellow", opacity=0.35, name="schnitt_ebene")
+
         self.hinweis_label.setText(
             f"Volumen ab Markierung: {volumen:.1f} mm³ "
             f"(Schnitthöhe Z={schnitt_hoehe:.1f}, {anzahl_markiert} markierte Punkte gefunden)"
         )
+
+    def aktualisiere_farbvorschau(self):
+        hex_code = f"#{self.slider_farbe_r.value():02X}{self.slider_farbe_g.value():02X}{self.slider_farbe_b.value():02X}"
+        self.markierungsfarbe = hex_code
+        self.farbvorschau.setStyleSheet(f"background-color: {hex_code}; border: 2px solid #4A90D9; border-radius: 6px;")
+
+
+    def setze_markierungsfarbe(self, hex_code: str):
+        self.markierungsfarbe = hex_code
+        self.farbvorschau.setStyleSheet(f"background-color: {hex_code}; border: 2px solid #4A90D9; border-radius: 6px;")
+
+        # Slider mitziehen, damit alle 3 Wege (Slider/Grid/Pipette) synchron bleiben
+        r, g, b = int(hex_code[1:3], 16), int(hex_code[3:5], 16), int(hex_code[5:7], 16)
+        self.slider_farbe_r.blockSignals(True); self.slider_farbe_r.setValue(r); self.slider_farbe_r.blockSignals(False)
+        self.slider_farbe_g.blockSignals(True); self.slider_farbe_g.setValue(g); self.slider_farbe_g.blockSignals(False)
+        self.slider_farbe_b.blockSignals(True); self.slider_farbe_b.setValue(b); self.slider_farbe_b.blockSignals(False)
+
+
+    def erzeuge_farbpalette(self, anzahl = 81):
+        import colorsys
+        farben = []
+        for i in range(anzahl):
+            h = i / anzahl
+            s = 0.85 if i % 2 == 0 else 0.55
+            v = 0.9 if i % 3 != 0 else 0.65
+            r, g, b = colorsys.hsv_to_rgb(h, s, v)
+            farben.append('#{:02X}{:02X}{:02X}'.format(int(r*255), int(g*255), int(b*255)))
+        return farben
+
+
+    def pipette_aktivieren(self):
+        self._pipette_aktiv = True
+        self.plotter.interactor.setCursor(Qt.CrossCursor)
+        self.plotter.interactor.installEventFilter(self)
+        self.hinweis_label.setText("Pipette aktiv - auf den Scan klicken, um eine Farbe aufzunehmen.")
+
+    def eventFilter(self, obj, event):
+        if getattr(self, "_pipette_aktiv", False) and obj is self.plotter.interactor and event.type() == QEvent.MouseButtonPress:
+            self._pipette_aktiv = False
+            self.plotter.interactor.unsetCursor()
+            self.plotter.interactor.removeEventFilter(self)
+
+            position = event.position().toPoint()
+            skala = self.plotter.interactor.devicePixelRatioF()   # HiDPI-Korrektur
+            x, y = int(position.x() * skala), int(position.y() * skala)
+
+            bild_array = self.plotter.screenshot(return_img=True)
+            hoehe, breite = bild_array.shape[:2]
+            x = min(max(x, 0), breite - 1)
+            y = min(max(y, 0), hoehe - 1)
+            r, g, b = bild_array[y, x][:3]
+
+            self.setze_markierungsfarbe(f"#{r:02X}{g:02X}{b:02X}")
+            self.hinweis_label.setText(f"Farbe aufgenommen: {self.markierungsfarbe}")
+            return True
+        return super().eventFilter(obj, event)
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
