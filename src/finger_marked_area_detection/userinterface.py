@@ -232,18 +232,38 @@ class HauptFenster(QMainWindow):
 
         self.button_vermessen_weiter = QPushButton("Eingezeichneten \nBereich / Umfang \nvermessen")
         self.button_Strecke_vermessen = QPushButton("Eingezeichnete \nStrecke vermessen")
+        self.button_Volumen_vermessen = QPushButton("Volumen \nvermessen")
 
         self.button_vermessen_weiter.setFixedSize(192, 108)
         self.button_Strecke_vermessen.setFixedSize(192, 108)
+        self.button_Volumen_vermessen.setFixedSize(192, 108)
 
         self.button_vermessen_weiter.clicked.connect(self.bereich_vermessen_start)
         self.button_Strecke_vermessen.clicked.connect(self.strecke_messen_klick)
+        self.button_Volumen_vermessen.clicked.connect(self.volumen_messen_klick)
 
         vermessung_wahl_layout.addWidget(self.button_vermessen_weiter)
         vermessung_wahl_layout.addWidget(self.button_Strecke_vermessen)
+        vermessung_wahl_layout.addWidget(self.button_Volumen_vermessen)
 
         self.knopf_layout.addWidget(self.vermessung_wahl_container)
         self.vermessung_wahl_container.setVisible(False)
+
+        self.volumen_container = QWidget()  
+        volumen_layout = QVBoxLayout(self.volumen_container)
+
+        self.button_gesamtes_volumen_berechnen = QPushButton("Gesamtes Volumen\nberechnen")
+        self.button_Finger_spitze_volumen_berechnen = QPushButton("Volumen der\nFingerspitze\nberechnen")
+        self.button_gesamtes_volumen_berechnen.setFixedSize(192, 108)
+        self.button_gesamtes_volumen_berechnen.clicked.connect(self.volumen_ganzes_mesh_messen_klick)
+        self.button_Finger_spitze_volumen_berechnen.setFixedSize(192, 108)
+        self.button_Finger_spitze_volumen_berechnen.clicked.connect(self.volumen_Finger_spitze_messen_klick)
+
+        volumen_layout.addWidget(self.button_gesamtes_volumen_berechnen)
+        volumen_layout.addWidget(self.button_Finger_spitze_volumen_berechnen)
+
+        self.knopf_layout.addWidget(self.volumen_container)
+        self.volumen_container.setVisible(False)
 
         self.navigatecontainer = QWidget()
         navigate_layout = QVBoxLayout(self.navigatecontainer)
@@ -617,6 +637,72 @@ class HauptFenster(QMainWindow):
             show_point=True, 
             color="red", 
             point_size=20
+        )
+
+
+    def finde_markierungs_punkte(self,teile: list, hex_code: str, toleranz: float = 40.0) -> np.ndarray:
+        ziel_rgb = np.array([int(hex_code.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)])
+
+        alle_markierten_punkte = []
+        for pv_mesh, tex in teile:
+            if pv_mesh.active_texture_coordinates is None:
+                continue
+            uv = pv_mesh.active_texture_coordinates
+            bild_array = tex.to_array()
+            hoehe, breite = bild_array.shape[:2]
+
+            x_pixel = np.clip((uv[:, 0] * (breite - 1)).astype(int), 0, breite - 1)
+            y_pixel = np.clip(((1 - uv[:, 1]) * (hoehe - 1)).astype(int), 0, hoehe - 1)
+
+            vertex_farben = bild_array[y_pixel, x_pixel]
+            distanzen = np.linalg.norm(vertex_farben.astype(float) - ziel_rgb, axis=1)
+            maske = distanzen < toleranz
+
+            if maske.any():
+                alle_markierten_punkte.append(pv_mesh.points[maske])
+
+        if not alle_markierten_punkte:
+            return np.empty((0, 3))
+        return np.vstack(alle_markierten_punkte)
+
+
+    def volumen_ab_markierung(self,hand_mesh: p_v.PolyData, teile: list, hex_code: str = "#DD11ED", toleranz: float = 100.0):
+        markierte_punkte = self.finde_markierungs_punkte(teile, hex_code, toleranz)
+        if len(markierte_punkte) == 0:
+            raise ValueError(f"Keine Markierung mit Farbe {hex_code} gefunden.")
+
+        schnitt_hoehe = markierte_punkte[:, 2].mean()
+        geschnitten = hand_mesh.clip(normal=(0, 0, 1), origin=(0, 0, schnitt_hoehe), invert=False)
+
+        return geschnitten.volume, schnitt_hoehe, len(markierte_punkte)
+
+    def volumen_messen_klick(self):
+        self.volumen_container.setVisible(True)
+        self.vermessung_wahl_container.setVisible(False)
+
+
+    def volumen_ganzes_mesh_messen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        volumen = self.aktuelles_hand_mesh.volume
+        self.hinweis_label.setText(f"Volumen des gesamten Mesh: {volumen:.1f} mm³")
+
+    def volumen_Finger_spitze_messen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        try:
+            volumen, schnitt_hoehe, anzahl_markiert = self.volumen_ab_markierung(
+                self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code="#DD11ED"
+            )
+        except ValueError as e:
+            self.hinweis_label.setText(f"Fehler: {e}")
+            return
+
+        self.hinweis_label.setText(
+            f"Volumen ab Markierung: {volumen:.1f} mm³ "
+            f"(Schnitthöhe Z={schnitt_hoehe:.1f}, {anzahl_markiert} markierte Punkte gefunden)"
         )
 
     def heatmap_klick(self):

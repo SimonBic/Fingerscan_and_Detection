@@ -5,6 +5,18 @@ import trimesh
 from scipy.spatial import cKDTree
 from PIL import Image
 
+
+def hole_textur_bild(material):
+    if material.image is not None:
+        return material.image.convert("RGB")
+
+    farbe = getattr(material, "diffuse", None)
+    if farbe is None:
+        farbe = getattr(material, "main_color", [200, 200, 200, 255])
+    farbe_rgb = tuple(int(c) for c in farbe[:3])
+    return Image.new("RGB", (8, 8), farbe_rgb)
+
+
 def load_teilmeshe_mit_textur(obj_pfad: str):
     geladen = trimesh.load(str(obj_pfad[0]), process=False)
  
@@ -29,7 +41,7 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
         pv_mesh.active_texture_coordinates = tmesh.visual.uv
         pv_mesh = pv_mesh.compute_normals(point_normals=True, auto_orient_normals=True)
  
-        bild_array = np.array(tmesh.visual.material.image.convert("RGB"))
+        bild_array = np.array(hole_textur_bild(tmesh.visual.material))
         tex = p_v.Texture(bild_array)
  
         ergebnis.append((pv_mesh, tex))
