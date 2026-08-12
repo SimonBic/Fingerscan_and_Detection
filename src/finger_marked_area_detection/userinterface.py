@@ -3,12 +3,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 import PySide6
 qt_lib_pfad = os.path.join(os.path.dirname(PySide6.__file__), "Qt", "lib")
 os.environ["LD_LIBRARY_PATH"] = qt_lib_pfad + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+
 import sys
 import trimesh
 import pyvistaqt
 import pyvista as p_v
 from isolate_finger import load_teilmeshe_mit_textur, isolate_finger
-from draw_area_on_scan_experimental import draw_main, save_drawn_area
+from draw_area_on_scan_experimental import (
+    draw_main, 
+    save_drawn_area, 
+    extract_faces_of_hand, 
+    get_hand_region)
 from heatmap import heatmap_main
 import numpy as np
 from PySide6.QtGui import QColor
@@ -30,6 +35,9 @@ from PySide6.QtCore import QDir, Qt, QEvent
 from pyvistaqt import QtInteractor
 from pathlib import Path
 from theme import QSS
+from scipy.spatial import cKDTree
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 def isolate_finger_parameter_datei_pfad(scan_ordner: Path) -> Path:
         #Pfad zur Parameterdatei, siehe Ordnerstruktur.pdf (Update ich bald)
@@ -191,10 +199,17 @@ class HauptFenster(QMainWindow):
 
         self.malen_wahl_container = QWidget()
         malen_wahl_layout = QVBoxLayout(self.malen_wahl_container)
-        self.button_weiter_malen = QPushButton("Fertig gemalt")
+
+        self.button_weiter_malen = QPushButton("Fertig manuell\ngemalt")
         self.button_weiter_malen.setFixedSize(192, 108)
         self.button_weiter_malen.clicked.connect(self.weiter_klick_malen)
         malen_wahl_layout.addWidget(self.button_weiter_malen)
+
+        self.button_automatisch_einzeichnen = QPushButton("Automatisch einzeichnen")
+        self.button_automatisch_einzeichnen.setFixedSize(192, 108)
+        self.button_automatisch_einzeichnen.clicked.connect(self.automatisch_einzeichnen_klick)
+        malen_wahl_layout.addWidget(self.button_automatisch_einzeichnen)
+
         self.button_weiter_malen.setVisible(False)
 
         self.knopf_layout.addWidget(self.malen_wahl_container)
@@ -234,7 +249,7 @@ class HauptFenster(QMainWindow):
         self.vermessung_wahl_container = QWidget()
         vermessung_wahl_layout = QVBoxLayout(self.vermessung_wahl_container)
 
-        self.button_vermessen_weiter = QPushButton("Eingezeichneten \nBereich / Umfang \nvermessen")
+        self.button_vermessen_weiter = QPushButton("Eingezeichneten \nBereich / Umfang\n / Volumen\nvermessen")
         self.button_Strecke_vermessen = QPushButton("Eingezeichnete \nStrecke vermessen")
         self.button_Volumen_vermessen = QPushButton("Volumen \nvermessen")
 
@@ -660,6 +675,45 @@ class HauptFenster(QMainWindow):
         self.farbe_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
         self.navigatecontainer.setVisible(False)
+
+
+    
+    def baue_geschlossenen_pfad(self, punkte: np.ndarray) -> np.ndarray:
+        verbleibend = punkte.copy()
+        besucht = [verbleibend[0]]
+        verbleibend = np.delete(verbleibend, 0, axis=0)
+
+        while len(verbleibend) > 0:
+            letzter = besucht[-1]
+            distanzen = np.linalg.norm(verbleibend - letzter, axis=1)
+            naechster_index = np.argmin(distanzen)
+            besucht.append(verbleibend[naechster_index])
+            verbleibend = np.delete(verbleibend, naechster_index, axis=0)
+
+        return np.array(besucht)
+
+
+    def automatisch_einzeichnen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+
+        markierte_punkte = self.finde_markierungs_punkte(self.aktuelle_teile, hex_code="#00FFFF", toleranz=60.0)
+
+        if len(markierte_punkte) < 3:
+            self.hinweis_label.setText("Keine ausreichende blaue Markierung auf dem Scan gefunden.")
+            return
+
+        pfad = self.baue_geschlossenen_pfad(markierte_punkte)
+
+        mask = get_hand_region(self.aktuelles_hand_mesh, pfad)
+        flaeche = extract_faces_of_hand(self.aktuelles_hand_mesh, mask)
+
+        save_drawn_area(flaeche, Path(self.aktueller_ordner), "grün", {})
+
+        self.plotter.clear()
+        self.lade_und_zeige(Path(self.aktueller_ordner))
+        self.hinweis_label.setText(f"Fläche erkannt und gespeichert ({len(pfad)} Randpunkte).")
 
     def bereich_vermessen_start(self):
         if self.aktueller_ordner is None:
