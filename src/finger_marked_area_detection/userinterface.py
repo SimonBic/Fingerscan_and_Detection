@@ -212,6 +212,66 @@ class HauptFenster(QMainWindow):
 
         self.button_weiter_malen.setVisible(False)
 
+        self.einzeichnen_farbe = "#000000"   # Standard: Schwarz
+
+        self.einzeichnen_farbvorschau = QLabel()
+        self.einzeichnen_farbvorschau.setFixedSize(192, 40)
+        self.einzeichnen_farbvorschau.setStyleSheet(f"background-color: {self.einzeichnen_farbe}; border: 2px solid #4A90D9; border-radius: 6px;")
+        malen_wahl_layout.addWidget(self.einzeichnen_farbvorschau)
+
+        self.slider_einzeichnen_r = QSlider(Qt.Horizontal)
+        self.slider_einzeichnen_r.setRange(0, 255)
+        self.slider_einzeichnen_r.setValue(0)
+        malen_wahl_layout.addWidget(self.slider_einzeichnen_r)
+
+        self.slider_einzeichnen_g = QSlider(Qt.Horizontal)
+        self.slider_einzeichnen_g.setRange(0, 255)
+        self.slider_einzeichnen_g.setValue(0)
+        malen_wahl_layout.addWidget(self.slider_einzeichnen_g)
+
+        self.slider_einzeichnen_b = QSlider(Qt.Horizontal)
+        self.slider_einzeichnen_b.setRange(0, 255)
+        self.slider_einzeichnen_b.setValue(0)
+        malen_wahl_layout.addWidget(self.slider_einzeichnen_b)
+
+        self.slider_einzeichnen_r.valueChanged.connect(self.aktualisiere_einzeichnen_farbvorschau)
+        self.slider_einzeichnen_g.valueChanged.connect(self.aktualisiere_einzeichnen_farbvorschau)
+        self.slider_einzeichnen_b.valueChanged.connect(self.aktualisiere_einzeichnen_farbvorschau)
+
+        self.slider_einzeichnen_r.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 red); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+        self.slider_einzeichnen_g.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 green); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+        self.slider_einzeichnen_b.setStyleSheet("""
+            QSlider::groove:horizontal { height: 10px; border-radius: 5px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 white, stop:1 blue); }
+            QSlider::handle:horizontal { width: 16px; background: #4A90D9; border: 1px solid #3A73AD;
+                border-radius: 8px; margin: -4px 0; }
+            """)
+
+        self.button_pipette_einzeichnen = QPushButton("Pipette (Farbe vom Scan)")
+        self.button_pipette_einzeichnen.setFixedSize(192, 40)
+        self.button_pipette_einzeichnen.clicked.connect(lambda: self.pipette_aktivieren("einzeichnen"))
+        malen_wahl_layout.addWidget(self.button_pipette_einzeichnen)
+
+        einzeichnen_farb_grid = QGridLayout()
+        einzeichnen_farb_grid.setSpacing(2)
+        for i, farbe in enumerate(self.erzeuge_farbpalette(50)):
+            swatch = QPushButton()
+            swatch.setFixedSize(16, 16)
+            swatch.setStyleSheet(f"background-color: {farbe}; border: 1px solid #888; border-radius: 2px;")
+            swatch.clicked.connect(lambda checked=False, f=farbe: self.setze_einzeichnen_farbe(f))
+            einzeichnen_farb_grid.addWidget(swatch, i // 10, i % 10)
+        malen_wahl_layout.addLayout(einzeichnen_farb_grid)
+
         self.knopf_layout.addWidget(self.malen_wahl_container)
         self.malen_wahl_container.setVisible(False)        
 
@@ -331,7 +391,7 @@ class HauptFenster(QMainWindow):
 
         self.button_pipette = QPushButton("Pipette (Farbe vom Scan)")
         self.button_pipette.setFixedSize(192, 40)
-        self.button_pipette.clicked.connect(self.pipette_aktivieren)
+        self.button_pipette.clicked.connect(lambda: self.pipette_aktivieren("markierung"))
         volumen_layout.addWidget(self.button_pipette)
 
         farb_grid = QGridLayout()
@@ -693,12 +753,28 @@ class HauptFenster(QMainWindow):
         return np.array(besucht)
 
 
+    def aktualisiere_einzeichnen_farbvorschau(self):
+        hex_code = f"#{self.slider_einzeichnen_r.value():02X}{self.slider_einzeichnen_g.value():02X}{self.slider_einzeichnen_b.value():02X}"
+        self.einzeichnen_farbe = hex_code
+        self.einzeichnen_farbvorschau.setStyleSheet(f"background-color: {hex_code}; border: 2px solid #4A90D9; border-radius: 6px;")
+
+
+    def setze_einzeichnen_farbe(self, hex_code: str):
+        self.einzeichnen_farbe = hex_code
+        self.einzeichnen_farbvorschau.setStyleSheet(f"background-color: {hex_code}; border: 2px solid #4A90D9; border-radius: 6px;")
+
+        r, g, b = int(hex_code[1:3], 16), int(hex_code[3:5], 16), int(hex_code[5:7], 16)
+        self.slider_einzeichnen_r.blockSignals(True); self.slider_einzeichnen_r.setValue(r); self.slider_einzeichnen_r.blockSignals(False)
+        self.slider_einzeichnen_g.blockSignals(True); self.slider_einzeichnen_g.setValue(g); self.slider_einzeichnen_g.blockSignals(False)
+        self.slider_einzeichnen_b.blockSignals(True); self.slider_einzeichnen_b.setValue(b); self.slider_einzeichnen_b.blockSignals(False)
+
+
     def automatisch_einzeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
 
-        markierte_punkte = self.finde_markierungs_punkte(self.aktuelle_teile, hex_code="#00FFFF", toleranz=60.0)
+        markierte_punkte = self.finde_markierungs_punkte(self.aktuelle_teile, hex_code = self.einzeichnen_farbe, toleranz=60.0)
 
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende blaue Markierung auf dem Scan gefunden.")
@@ -869,8 +945,9 @@ class HauptFenster(QMainWindow):
         return farben
 
 
-    def pipette_aktivieren(self):
+    def pipette_aktivieren(self, ziel: str):
         self._pipette_aktiv = True
+        self._pipette_ziel = ziel   # "markierung" oder "einzeichnen"
         self.plotter.interactor.setCursor(Qt.CrossCursor)
         self.plotter.interactor.installEventFilter(self)
         self.hinweis_label.setText("Pipette aktiv - auf den Scan klicken, um eine Farbe aufzunehmen.")
@@ -882,7 +959,7 @@ class HauptFenster(QMainWindow):
             self.plotter.interactor.removeEventFilter(self)
 
             position = event.position().toPoint()
-            skala = self.plotter.interactor.devicePixelRatioF()   # HiDPI-Korrektur
+            skala = self.plotter.interactor.devicePixelRatioF()
             x, y = int(position.x() * skala), int(position.y() * skala)
 
             bild_array = self.plotter.screenshot(return_img=True)
@@ -890,9 +967,14 @@ class HauptFenster(QMainWindow):
             x = min(max(x, 0), breite - 1)
             y = min(max(y, 0), hoehe - 1)
             r, g, b = bild_array[y, x][:3]
+            hex_code = f"#{r:02X}{g:02X}{b:02X}"
 
-            self.setze_markierungsfarbe(f"#{r:02X}{g:02X}{b:02X}")
-            self.hinweis_label.setText(f"Farbe aufgenommen: {self.markierungsfarbe}")
+            if self._pipette_ziel == "einzeichnen":
+                self.setze_einzeichnen_farbe(hex_code)
+            else:
+                self.setze_markierungsfarbe(hex_code)
+
+            self.hinweis_label.setText(f"Farbe aufgenommen: {hex_code}")
             return True
         return super().eventFilter(obj, event)
 
