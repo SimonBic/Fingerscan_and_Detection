@@ -123,8 +123,11 @@ class HauptFenster(QMainWindow):
         # --- Farbe-Wahl (Untersuchungs-Farbe beim manuellen Speichern) ---
         self.farbe_wahl_container = QWidget()
         farbe_wahl_layout = QVBoxLayout(self.farbe_wahl_container)
+        num_untersuchung = 1
         for name, farbe in [("rot", "rot"), ("orange", "orange"), ("gelb", "gelb"), ("grün", "grün"), ("blau", "blau")]:
-            self._knopf(f"Untersuchung 1 \n{name}", lambda checked=False, f=farbe: self.farbenwahl(f), farbe_wahl_layout)
+            self._knopf(f"Untersuchung {num_untersuchung} \n{name}", lambda checked=False, f=farbe: self.farbenwahl(f), farbe_wahl_layout)
+            num_untersuchung = num_untersuchung + 1
+        num_untersuchung = 1
         self.knopf_layout.addWidget(self.farbe_wahl_container)
         self.farbe_wahl_container.setVisible(False)
 

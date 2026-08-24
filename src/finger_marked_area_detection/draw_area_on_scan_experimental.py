@@ -11,6 +11,7 @@ HEATMAPFARBEN = {
     "orange" : (255, 140, 0),
     "gelb" : (240, 220, 0),
     "grün" : (30, 180, 30),
+    "blau" : (20, 20, 200)
 }
 
 LANDMARK_NAMEN = {
