@@ -30,7 +30,8 @@ from farberkennung import (
     baue_geschlossenen_pfad)
 from messungen import (
     berechne_flaeche_und_umfang, 
-    volumen_ab_markierung)
+    volumen_ab_markierung,
+    volumen_ab_ring)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
     load_teilmeshe_mit_textur, 
@@ -139,7 +140,8 @@ class HauptFenster(QMainWindow):
         self.volumen_container = QWidget()
         volumen_layout = QVBoxLayout(self.volumen_container)
         self._knopf("Gesamtes Volumen\nberechnen", self.volumen_ganzes_mesh_messen_klick, volumen_layout)
-        self._knopf("Volumen über\nmarkierter Fläche\nberechnen", self.volumen_Finger_spitze_messen_klick, volumen_layout)
+        self._knopf("Volumen über\nmarkierter Fläche\nberechnen", self.volumen_alles_ueber_markierung, volumen_layout)
+        self._knopf("Volumen ab\nGummiring\nberechnen", self.volumen_ueber_ring, volumen_layout)
 
         self.markierung_farbwahl = FarbAuswahlWidget(standard_farbe="#DD11ED")
         self.markierung_farbwahl.button_pipette.clicked.connect(
@@ -444,7 +446,7 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
 
-        markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=60.0)
+        markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=80.0)
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende Markierung auf dem Scan gefunden.")
             return
@@ -515,7 +517,7 @@ class HauptFenster(QMainWindow):
         volumen = self.aktuelles_hand_mesh.volume
         self.hinweis_label.setText(f"Volumen des gesamten Mesh: {volumen:.1f} mm³")
 
-    def volumen_Finger_spitze_messen_klick(self):
+    def volumen_alles_ueber_markierung(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
@@ -538,7 +540,28 @@ class HauptFenster(QMainWindow):
             f"Volumen ab Markierung: {volumen:.1f} mm³ "
             f"(Schnitthöhe Z={schnitt_hoehe:.1f}, {anzahl_markiert} markierte Punkte gefunden)")
 
-    # ---------- Pipette (gemeinsam fuer beide Farbauswahl-Widgets) ----------
+    def volumen_ueber_ring(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        try:
+            volumen, schwerpunkt, normale, anzahl_markiert = volumen_ab_ring(
+                self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code=self.markierung_farbwahl.farbe
+            )
+        except ValueError as e:
+            self.hinweis_label.setText(f"Fehler: {e}")
+            return
+
+        bounds = self.aktuelles_hand_mesh.bounds
+        diagonale = np.linalg.norm([bounds[1]-bounds[0], bounds[3]-bounds[2], bounds[5]-bounds[4]])
+        ebene = p_v.Plane(center=schwerpunkt, direction=normale, i_size=diagonale, j_size=diagonale)
+        self.plotter.add_mesh(ebene, color="yellow", opacity=0.35, name="schnitt_ebene")
+
+        self.hinweis_label.setText(
+            f"Volumen ab Ring: {volumen:.1f} mm³ ({anzahl_markiert} markierte Punkte gefunden)"
+        )
+
+    # ---------- Pipette ----------
 
     def pipette_aktivieren(self, ziel_widget: FarbAuswahlWidget):
         self._pipette_aktiv = True

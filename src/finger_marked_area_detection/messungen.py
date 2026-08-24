@@ -19,3 +19,24 @@ def volumen_ab_markierung(hand_mesh: p_v.PolyData, teile: list, hex_code: str, t
     geschnitten = hand_mesh.clip(normal=(0, 0, 1), origin=(0, 0, schnitt_hoehe), invert=False)
  
     return geschnitten.volume, schnitt_hoehe, len(markierte_punkte)
+
+def baue_pca_ebene(punkte: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    schwerpunkt = punkte.mean(axis=0)
+    zentriert = punkte - schwerpunkt
+    _, _, vt = np.linalg.svd(zentriert, full_matrices=False)
+    normale = vt[2]
+    if normale[2] < 0:
+        normale = -normale
+    return schwerpunkt, normale
+ 
+ 
+def volumen_ab_ring(hand_mesh: p_v.PolyData, teile: list, hex_code: str, toleranz: float = 40.0):
+    markierte_punkte = finde_markierungs_punkte(teile, hex_code, toleranz)
+    if len(markierte_punkte) < 3:
+        raise ValueError(f"Keine ausreichende Ring-Markierung mit Farbe {hex_code} gefunden.")
+ 
+    schwerpunkt, normale = baue_pca_ebene(markierte_punkte)
+    geschnitten = hand_mesh.clip(normal=normale, origin=schwerpunkt, invert=False)
+ 
+    return geschnitten.volume, schwerpunkt, normale, len(markierte_punkte)
+ 
