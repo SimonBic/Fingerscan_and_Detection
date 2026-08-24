@@ -46,27 +46,62 @@ Die Erkennungsfarbe lässt sich frei einstellen, entweder per RGB-Regler, per Fa
 
 Beides parallel, nicht nur eins – die 2D-Variante ist vor allem für eine mögliche spätere ML-Auswertung gedacht.
 
-## Installation
+## Installation & Verwendung für Linux (fedora bzw. Red Hat / ubuntu bzw. Debian bereits getestet) 
 
-Voraussetzung: Python 3.14, Linux (Fedora bzw. Red Hat, Ubuntu bzw. Debian schon selbst getestet).
-(Ich arbeite an der Anbindung zu Windows und MacOS)
+Voraussetzung: Python 3.14.
+
+Installation: 
+
 ```bash
 git clone https://github.com/SimonBic/Fingerscan_and_Detection
 cd Fingerscan_and_Detection/src/installer
 ./install.sh
 ```
-
-Das Skript legt eine eigene virtuelle Umgebung an, installiert alle Pakete in exakt den getesteten Versionen aus `requirements.txt` und richtet ein Desktop-Icon ein. Läuft auf Fedora und Ubuntu.
-
-## Verwendung
+Vernwendung (Oder einfach das erstelle Icon anklicken)
 
 ```bash
 .venv/bin/python src/finger_marked_area_detection/main.py
 ```
 
-Oder einfach über das Desktop-Icon nach der Installation.
+Das Skript legt eine eigene virtuelle Umgebung an, installiert alle Pakete in exakt den getesteten Versionen aus `requirements.txt` und richtet ein Desktop-Icon ein. Läuft auf Fedora und Ubuntu.
+
 
 Scan-Ordner lassen sich per Drag-and-Drop reinziehen oder über den eingebauten Ordner-Browser links unten öffnen.
+
+## Installation und Verwendung
+
+
+
+### Schritt 1: Programm herunterladen
+
+Auf [github.com/SimonBic/Fingerscan_and_Detection](https://github.com/SimonBic/Fingerscan_and_Detection) oben rechts auf den grünen Button **"Code"** klicken, dann **"Download ZIP"**. Die heruntergeladene Datei irgendwo entpacken (z. B. Rechtsklick → "Alle extrahieren" unter Windows, Doppelklick unter macOS).
+
+### Schritt 2: Python installieren (falls noch nicht vorhanden)
+
+Das Programm braucht **Python 3.14**. Falls unsicher, ob das schon installiert ist: einfach Schritt 3 versuchen, falls Python fehlt, meldet sich das Programm mit einer klaren Fehlermeldung.
+
+Python-Download kostenlos unter [python.org/downloads](https://www.python.org/downloads/). **Wichtig unter Windows:** beim Installieren unten den Haken bei **"Add python.exe to PATH"** setzen, sonst funktioniert der nächste Schritt nicht.
+
+### Schritt 3: Installation starten
+
+#### Unter Windows
+
+1. Im entpackten Ordner in eine leere Fläche **Umschalt-Taste gedrückt halten und gleichzeitig rechtsklicken**
+2. **"PowerShell-Fenster hier öffnen"** auswählen (ein schwarzes/blaues Textfenster öffnet sich)
+3. Folgendes eintippen und Enter drücken: "python src\installer\install.py"
+4. Kurz warten (das lädt im Hintergrund alles Nötige herunter) – am Ende steht "Installation abgeschlossen"
+
+Danach liegt ein **Symbol "Fingerscan Viewer"** auf dem Desktop und im Startmenü, einfach doppelklicken zum Starten.
+
+#### Unter macOS
+
+1. **Terminal** öffnen: `Cmd + Leertaste` drücken, "Terminal" eintippen, Enter
+2. Im Terminal-Fenster `cd ` eintippen (**mit** Leerzeichen danach, **ohne** Enter), dann den entpackten Ordner **per Maus ins Terminal-Fenster ziehen** – der Pfad wird automatisch eingefügt. Jetzt Enter drücken
+3. Folgendes eintippen und Enter drücken: "python3 src/installer/install.py"
+4. Kurz warten, am Ende steht "Installation abgeschlossen"
+
+Danach liegt ein **Symbol "Fingerscan Viewer"** auf dem Schreibtisch. **Beim allerersten Doppelklick** meldet macOS eventuell "kann nicht geöffnet werden", dann stattdessen **rechtsklicken → Öffnen** (nur beim ersten Mal nötig).
+
 
 ## Ordnerstruktur
 
