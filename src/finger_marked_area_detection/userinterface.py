@@ -13,7 +13,8 @@ from draw_area_on_scan_experimental import (
     draw_main, 
     save_drawn_area, 
     extract_faces_of_hand, 
-    get_hand_region)
+    get_hand_region,
+    entferne_ausreisser_punkte)
 from heatmap import heatmap_main
 import numpy as np
 from PySide6.QtGui import QColor
@@ -780,6 +781,7 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Keine ausreichende blaue Markierung auf dem Scan gefunden.")
             return
 
+        markierte_punkte = entferne_ausreisser_punkte(markierte_punkte)
         pfad = self.baue_geschlossenen_pfad(markierte_punkte)
 
         mask = get_hand_region(self.aktuelles_hand_mesh, pfad)
