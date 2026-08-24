@@ -27,7 +27,8 @@ from utils import generator_bis_ende
 from farberkennung import (
     finde_markierungs_punkte, 
     entferne_ausreisser_punkte, 
-    baue_geschlossenen_pfad)
+    baue_geschlossenen_pfad,
+    schliesse_maske)
 from messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
@@ -446,7 +447,7 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
 
-        markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=80.0)
+        markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=100.0)
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende Markierung auf dem Scan gefunden.")
             return
@@ -455,6 +456,7 @@ class HauptFenster(QMainWindow):
         pfad = baue_geschlossenen_pfad(markierte_punkte)
 
         mask = get_hand_region(self.aktuelles_hand_mesh, pfad)
+        mask = schliesse_maske(self.aktuelles_hand_mesh, mask, schritte = 2)
         flaeche = extract_faces_of_hand(self.aktuelles_hand_mesh, mask)
         save_drawn_area(flaeche, Path(self.aktueller_ordner), "grün", {})
 

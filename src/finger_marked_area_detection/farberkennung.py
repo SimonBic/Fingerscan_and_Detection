@@ -41,20 +41,21 @@ def finde_markierungs_punkte(teile: list, hex_code: str, toleranz: float = 40.0)
     return np.vstack(alle_markierten_punkte)
 
 
-
-def entferne_ausreisser_punkte(punkte: np.ndarray, min_cluster_groesse: int = 10) -> np.ndarray:
-
+def entferne_ausreisser_punkte(punkte: np.ndarray, verbindungs_faktor: float = 15.0) -> np.ndarray:
+    if len(punkte) < 2:
+        return punkte
+ 
     baum = cKDTree(punkte)
     distanzen, _ = baum.query(punkte, k=2)
     typischer_abstand = np.median(distanzen[:, 1])
-    max_nachbar_distanz = typischer_abstand * 5
-
+    max_nachbar_distanz = typischer_abstand * verbindungs_faktor
+ 
     paare = baum.query_pairs(r=max_nachbar_distanz, output_type='ndarray')
     n = len(punkte)
     daten = np.ones(len(paare))
     matrix = csr_matrix((daten, (paare[:, 0], paare[:, 1])), shape=(n, n))
     matrix = matrix + matrix.T
-
+ 
     anzahl, labels = connected_components(matrix, directed=False)
     groessen = np.bincount(labels)
     groesstes_label = np.argmax(groessen)
@@ -74,3 +75,32 @@ def baue_geschlossenen_pfad(punkte: np.ndarray) -> np.ndarray:
         verbleibend = np.delete(verbleibend, naechster_index, axis=0)
 
     return np.array(besucht)
+
+def _baue_nachbarschafts_matrix(mesh):
+    faces = mesh.faces.reshape(-1, 4)[:, 1:]
+    kanten_liste = []
+    for f in faces:
+        kanten_liste += [(f[0], f[1]), (f[1], f[2]), (f[2], f[0])]
+    kanten_arr = np.array(kanten_liste)
+    n = mesh.n_points
+    daten = np.ones(len(kanten_arr))
+    matrix = csr_matrix((daten, (kanten_arr[:, 0], kanten_arr[:, 1])), shape=(n, n))
+    return matrix + matrix.T
+ 
+ 
+def schliesse_maske(mesh, maske: np.ndarray, schritte: int = 2) -> np.ndarray:
+    #entfernt kleine trails, also Linien aus kleinen, erkannten Flächen, damit am Ende nur noch eine existiert
+    #mit Dilation und Closing, alte Technik
+    nachbar_matrix = _baue_nachbarschafts_matrix(mesh)
+ 
+    aktuelle = maske.copy()
+    for _ in range(schritte):
+        aktuelle = aktuelle | (nachbar_matrix.dot(aktuelle.astype(int)) > 0)
+ 
+    grad = np.array(nachbar_matrix.sum(axis=1)).flatten()
+    for _ in range(schritte):
+        nachbarn_markiert = nachbar_matrix.dot(aktuelle.astype(int))
+        aktuelle = aktuelle & (nachbarn_markiert >= grad)
+ 
+    return aktuelle
+ 
