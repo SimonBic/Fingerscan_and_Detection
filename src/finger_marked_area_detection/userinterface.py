@@ -32,7 +32,8 @@ from farberkennung import (
 from messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
-    volumen_ab_ring)
+    volumen_ab_ring, 
+    volumen_ab_fingerzwischenfalte)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
     load_teilmeshe_mit_textur, 
@@ -146,6 +147,7 @@ class HauptFenster(QMainWindow):
         self._knopf("Gesamtes Volumen\nberechnen", self.volumen_ganzes_mesh_messen_klick, volumen_layout)
         self._knopf("Volumen über\nmarkierter Fläche\nberechnen", self.volumen_alles_ueber_markierung, volumen_layout)
         self._knopf("Volumen ab\nGummiring\nberechnen", self.volumen_ueber_ring, volumen_layout)
+        self._knopf("Volumen ab Höhe\nder Fingerzwischenfalte\n messen", self.volumen_ab_fingerzwischenfalte_klick, volumen_layout)
 
         self.markierung_farbwahl = FarbAuswahlWidget(standard_farbe="#DD11ED")
         self.markierung_farbwahl.button_pipette.clicked.connect(
@@ -566,6 +568,30 @@ class HauptFenster(QMainWindow):
             f"Volumen ab Ring: {volumen:.1f} mm³ ({anzahl_markiert} markierte Punkte gefunden)"
         )
 
+    def volumen_ab_fingerzwischenfalte_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        if "iso" not in str(self.aktueller_ordner):
+            self.hinweis_label.setText("Erst den Finger isolieren")
+            return
+
+        try:
+            volumen = volumen_ab_fingerzwischenfalte(self.aktuelles_hand_mesh)
+        except ValueError as e:
+            self.hinweis_label.setText(f"Fehler: {e}")
+            return
+
+        bounds = self.aktuelles_hand_mesh.bounds
+        mitte_x = (bounds[0] + bounds[1]) / 2
+        mitte_y = (bounds[2] + bounds[3]) / 2
+        breite = (bounds[1] - bounds[0]) * 1.5
+        tiefe = (bounds[3] - bounds[2]) * 1.5
+        ebene = p_v.Plane(center=(mitte_x, mitte_y, 0), direction=(0, 0, 1), i_size=breite, j_size=tiefe)
+        self.plotter.add_mesh(ebene, color="yellow", opacity=0.35, name="schnitt_ebene")
+
+        self.hinweis_label.setText(
+            f"Volumen ab der Höhe der Fingerzwischenfalte: {volumen:.1f} mm³")
     # ---------- Pipette ----------
 
     def pipette_aktivieren(self, ziel_widget: FarbAuswahlWidget):

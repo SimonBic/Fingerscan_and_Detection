@@ -39,4 +39,15 @@ def volumen_ab_ring(hand_mesh: p_v.PolyData, teile: list, hex_code: str, toleran
     geschnitten = hand_mesh.clip(normal=normale, origin=schwerpunkt, invert=False)
  
     return geschnitten.volume, schwerpunkt, normale, len(markierte_punkte)
+
+def volumen_ab_fingerzwischenfalte(hand_mesh: p_v.PolyData) -> float:
+    bounds = hand_mesh.bounds
+    if bounds[4] > 0 or bounds[5] < 0:
+        raise ValueError(
+            "Das Mesh scheint bei Z = 0 nicht die Fingerzwischenfalte zu haben"
+            "ist das ein isolierter, final ausgerichteter Finger?"
+        )
+ 
+    geschnitten = hand_mesh.clip(normal=(0, 0, 1), origin=(0, 0, 0), invert=False)
+    return geschnitten.volume
  
