@@ -4,7 +4,6 @@ import trimesh
 import numpy as np
 import vtk
 from PIL import Image 
-import heatmap
 
 HEATMAPFARBEN = {
     "rot" : (220, 20, 20),
@@ -102,6 +101,22 @@ def save_drawn_area(area, original_folder, farbenname, landmarken):
     print(f"Erfolgreich gespeichert unter dem Pfad: {save_path}")
 
     return save_path
+
+
+def lese_markierungsfarbe(obj_pfad: Path) -> tuple:
+    geladen = trimesh.load(str(obj_pfad), process=False, split_objects=True)
+ 
+    if isinstance(geladen, trimesh.Scene):
+        for name, geom in geladen.geometry.items():
+            if name.startswith("landmark_"):
+                continue
+            bild = np.array(geom.visual.material.image.convert("RGB"))
+            return tuple(int(c) for c in bild[0, 0])
+        raise ValueError(f"Keine Flaechen-Geometrie (nur Landmarken?) in {obj_pfad} gefunden.")
+ 
+    bild = np.array(geladen.visual.material.image.convert("RGB"))
+    return tuple(int(c) for c in bild[0, 0])
+ 
 
 
 def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starten):

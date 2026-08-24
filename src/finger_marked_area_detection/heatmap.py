@@ -1,145 +1,117 @@
 from pathlib import Path
-
 import numpy as np
 import trimesh
+import pyvista as p_v
 import matplotlib.pyplot as plt
 
-
-def erstelle_koordinatensystem(landmarken: dict) -> dict:
-    # Haut des Fingers wird abgewickelt nach Zylinderkoordinaten
-    #stab des Zylinders ist die Achse von mitt der beiden rillen zur Fingerspitze
-
-    linke_rille = landmarken["linke_rille"]
-    rechte_rille = landmarken["rechte_rille"]
-    fingerspitze = landmarken["fingerspitze"]
-
-    #Mitte der beiden Rillen
-    basis_mitte = (linke_rille + rechte_rille) / 2
-    #Vektor der Achse
-    achse_richtung = fingerspitze - basis_mitte
-    achse_richtung = achse_richtung / np.linalg.norm(achse_richtung)
-
-    # Referenzrichtung (Winkel = 0) zeigt zur linken Rille
-    referenz_radial = linke_rille - basis_mitte
-    referenz_radial = referenz_radial - np.dot(referenz_radial, achse_richtung) * achse_richtung
-    referenz_radial = referenz_radial / np.linalg.norm(referenz_radial)
-
-    quer_richtung = np.cross(achse_richtung, referenz_radial)
-
-    # Hoehen-Nullpunkt = Hoehe der linken Rille selbst
-    h_offset = np.dot(linke_rille - basis_mitte, achse_richtung)
-
-    return dict(
-        basis_mitte=basis_mitte,
-        achse_richtung=achse_richtung,
-        referenz_radial=referenz_radial,
-        quer_richtung=quer_richtung,
-        h_offset=h_offset,
-    )
+from draw_area_on_scan_experimental import lese_markierungsfarbe
 
 
-def punkt_abwickeln(punkt: np.ndarray, ks: dict) -> tuple:
-    """Wandelt einen einzelnen 3D-Punkt in (bogenlaenge, hoehe) um.
-    Fuer die reine 2D-Darstellung (Plot)."""
-    relativ = punkt - ks["basis_mitte"]
-    hoehe_roh = np.dot(relativ, ks["achse_richtung"])
-    hoehe = hoehe_roh - ks["h_offset"]
-
-    radial = relativ - hoehe_roh * ks["achse_richtung"]
-    radius = np.linalg.norm(radial)
-
-    if radius < 1e-9:
-        return 0.0, hoehe  # Punkt liegt exakt auf der Mittelachse
-
-    winkel = np.arctan2(np.dot(radial, ks["quer_richtung"]), np.dot(radial, ks["referenz_radial"]))
+def punkt_abwickeln(punkt: np.ndarray) -> tuple:
+    x, y, z = punkt
+    winkel = np.arctan2(y, x) % (2 * np.pi)
+    radius = np.hypot(x, y)
     bogenlaenge = winkel * radius
+    hoehe = z
     return bogenlaenge, hoehe
 
 
-def punkt_zu_zylinderkoordinaten(punkt: np.ndarray, ks: dict) -> tuple:
-    relativ = punkt - ks["basis_mitte"]
-    hoehe_roh = np.dot(relativ, ks["achse_richtung"])
-    hoehe = hoehe_roh - ks["h_offset"]
-
-    radial = relativ - hoehe_roh * ks["achse_richtung"]
-    radius = np.linalg.norm(radial)
-
-    if radius < 1e-9:
-        return 0.0, hoehe, 0.0
-
-    winkel = np.arctan2(np.dot(radial, ks["quer_richtung"]), np.dot(radial, ks["referenz_radial"]))
-    return winkel, hoehe, radius
+def flaeche_abwickeln(punkte_3d: np.ndarray) -> np.ndarray:
+    return np.array([punkt_abwickeln(p) for p in punkte_3d])
 
 
-def zylinderkoordinaten_zu_punkt(winkel: float, hoehe: float, radius: float, ks: dict) -> np.ndarray:
-    """Exakte Umkehrfunktion zu punkt_zu_zylinderkoordinaten()."""
-    hoehe_roh = hoehe + ks["h_offset"]
-    achsen_punkt = ks["basis_mitte"] + hoehe_roh * ks["achse_richtung"]
-    radial = radius * (np.cos(winkel) * ks["referenz_radial"] + np.sin(winkel) * ks["quer_richtung"])
-    return achsen_punkt + radial
-
-
-def flaeche_abwickeln(punkte_3d: np.ndarray, landmarken: dict) -> np.ndarray:
-    """Wandelt mehrere 3D-Punkte auf einmal in 2D-Koordinaten um.
-    Gibt ein (n,2)-Array zurueck: Spalte 0 = Bogenlaenge, Spalte 1 = Hoehe."""
-    ks = erstelle_koordinatensystem(landmarken)
-    return np.array([punkt_abwickeln(p, ks) for p in punkte_3d])
-
-
-def lade_markierung_mit_landmarken(obj_pfad: Path):
-    #Lädt die Markierungen, identifiziert dabei die Landmarken und speichert sie
+def lade_markierung(obj_pfad: Path) -> np.ndarray:
     geladen = trimesh.load(str(obj_pfad), process=False, split_objects=True)
 
-    if not isinstance(geladen, trimesh.Scene):
-        raise ValueError(
-            f"{obj_pfad} enthaelt keine Szene mit mehreren Teilen - "
-            f"wurden die Landmarken beim Speichern mit exportiert?"
-        )
+    if isinstance(geladen, trimesh.Scene):
+        alle_punkte = [
+            geom.vertices for name, geom in geladen.geometry.items()
+            if not name.startswith("landmark_")
+        ]
+        if not alle_punkte:
+            raise ValueError(f"{obj_pfad} enthaelt keine Flaechen-Geometrie.")
+        return np.vstack(alle_punkte)
 
-    flaeche_punkte = None
-    landmarken = {}
+    return geladen.vertices
 
-    for name, geom in geladen.geometry.items():
-        if name.startswith("landmark_"):
-            # Name hat die Form 'landmark_<name>_material_X' - den
-            # eigentlichen Landmark-Namen dazwischen extrahieren
-            landmark_name = name.replace("landmark_", "", 1).rsplit("_material_", 1)[0]
-            landmarken[landmark_name] = geom.vertices.mean(axis=0)
-        else:
-            flaeche_punkte = geom.vertices
 
-    return flaeche_punkte, landmarken
+def finde_markierte_scans(patienten_ordner: Path) -> list:
+    markierte_scans_ordner = patienten_ordner / "markierte_scans"
+    if not markierte_scans_ordner.is_dir():
+        return []
+    return sorted(markierte_scans_ordner.glob("*/*.obj"))
 
 
 def heatmap_main(path: str):
-    import matplotlib.pyplot as plt
+    # Erzeugt den 2D-'Genesungsverlauf' - eine abgewickelte Ansicht
+    # ALLER Untersuchungen desselben Patienten uebereinander, jede
+    # Markierung in ihrer eigenen, aus der Datei zurueckgelesenen
+    # Untersuchungs-Farbe. Wird zusaetzlich zur 3D-Ansicht erzeugt
+    # (baue_3d_genesungsverlauf) - z.B. fuer spaetere ML-Auswertung.
+    scan_ordner = Path(path)
+    patienten_ordner = scan_ordner.parent.parent
 
-    markierungen_ordner = Path(path)
-    obj_dateien = sorted(markierungen_ordner.glob("*.obj"))
-
+    obj_dateien = finde_markierte_scans(patienten_ordner)
     if not obj_dateien:
-        print("Keine .obj-Dateien gefunden.")
-    else:
-        fig, ax = plt.subplots(figsize=(8, 10))
+        print("Keine markierten Scans fuer diesen Patienten gefunden.")
+        return
 
-        for obj_pfad in obj_dateien:
-            flaeche_punkte, landmarken = lade_markierung_mit_landmarken(obj_pfad)
+    fig, ax = plt.subplots(figsize=(8, 10))
 
-            if not all(k in landmarken for k in ("linke_rille", "rechte_rille", "fingerspitze")):
-                print(f"Ueberspringe {obj_pfad.name}: nicht alle Landmarken gefunden.")
-                continue
+    for obj_pfad in obj_dateien:
+        try:
+            flaeche_punkte = lade_markierung(obj_pfad)
+            farbe_rgb = lese_markierungsfarbe(obj_pfad)
+        except ValueError as e:
+            print(f"Ueberspringe {obj_pfad.name}: {e}")
+            continue
 
-            koordinaten_2d = flaeche_abwickeln(flaeche_punkte, landmarken)
+        farbe_matplotlib = tuple(c / 255 for c in farbe_rgb)
+        koordinaten_2d = flaeche_abwickeln(flaeche_punkte)
+        ax.scatter(koordinaten_2d[:, 0], koordinaten_2d[:, 1],
+                   color=farbe_matplotlib, label=obj_pfad.parent.name, s=8, alpha=0.7)
 
-            ax.scatter(koordinaten_2d[:, 0], koordinaten_2d[:, 1], label=obj_pfad.stem, s=8, alpha=0.6)
+    ax.set_xlabel("Bogenlaenge um den Finger (mm)")
+    ax.set_ylabel("Hoehe entlang des Fingers (mm)")
+    ax.set_title("Genesungsverlauf - abgewickelte Markierungen")
+    ax.legend()
+    ax.set_aspect("equal")
+    ax.grid(True, alpha=0.3)
 
-        ax.set_xlabel("Bogenlaenge um den Finger (mm)")
-        ax.set_ylabel("Hoehe entlang des Fingers (mm)")
-        ax.set_title("Genesungsverlauf - abgewickelte Markierungen")
-        ax.legend()
-        ax.set_aspect("equal")
-        ax.grid(True, alpha=0.3)
+    heatmap_ordner = patienten_ordner / "heatmap"
+    heatmap_ordner.mkdir(exist_ok=True)
+    save_path = heatmap_ordner / "Genesungsverlauf.png"
+    plt.savefig(save_path, dpi=150)
+    print(f"Plot gespeichert unter: {save_path}")
+    plt.show()
 
-        plt.savefig(markierungen_ordner / "heatmap_verlauf.png", dpi=150)
-        print(f"Plot gespeichert unter: {markierungen_ordner / 'heatmap_verlauf.png'}")
-        plt.show()
+
+def baue_3d_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, path: str) -> list:
+    # Findet fuer JEDEN Punkt JEDER frueheren Markierung den
+    # naechstgelegenen Punkt auf dem AKTUELLEN Scan (direkt in 3D,
+    # ohne Umweg ueber 2D-Koordinaten) - funktioniert, weil alle
+    # isolierten Scans desselben Patienten in derselben kanonischen
+    # Ausrichtung liegen (berechne_finale_ausrichtung), auch wenn der
+    # Finger bei jeder Untersuchung etwas anders gehalten wurde.
+
+    # Gibt eine Liste von (3D-Punkte-Array, RGB-Farbe) zurueck, eine
+    # pro gefundener Untersuchungs-Markierung - zum direkten Anzeigen
+    # im Plotter (z.B. per plotter.add_points(punkte, color=farbe))
+    scan_ordner = Path(path)
+    patienten_ordner = scan_ordner.parent.parent
+
+    ergebnisse = []
+    for obj_pfad in finde_markierte_scans(patienten_ordner):
+        try:
+            punkte = lade_markierung(obj_pfad)
+            farbe_rgb = lese_markierungsfarbe(obj_pfad)
+        except ValueError as e:
+            print(f"Ueberspringe {obj_pfad.name}: {e}")
+            continue
+
+        naechste_indices = [aktueller_scan_mesh.find_closest_point(p) for p in punkte]
+        naechste_punkte = aktueller_scan_mesh.points[naechste_indices]
+
+        ergebnisse.append((naechste_punkte, farbe_rgb))
+
+    return ergebnisse

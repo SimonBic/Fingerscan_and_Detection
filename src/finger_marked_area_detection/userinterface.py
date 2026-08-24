@@ -46,7 +46,9 @@ from draw_area_on_scan_experimental import (
     save_drawn_area, 
     extract_faces_of_hand, 
     get_hand_region)
-from heatmap import heatmap_main
+from heatmap import (
+    heatmap_main,
+    baue_3d_genesungsverlauf)
 
 
 class HauptFenster(QMainWindow):
@@ -80,6 +82,7 @@ class HauptFenster(QMainWindow):
         self.button_zeichnen = self._knopf("Bereich einzeichnen", self.zeichnen_klick, haupt_buttons_layout)
         self.button_vermessen = self._knopf("Bereich / Strecke \nvermessen", self.vermessen_klick, haupt_buttons_layout)
         self.button_heatmap = self._knopf("Heatmap erzeugen", self.heatmap_klick, haupt_buttons_layout)
+        self.button_genesungsverlauf = self._knopf("3D Genesungsverlauf\nanzeigen", self.genesungsverlauf_3d_klick, haupt_buttons_layout)
         self.knopf_layout.addWidget(self.haupt_buttons_container)
 
         # --- Isolieren-Wahl ---
@@ -463,10 +466,11 @@ class HauptFenster(QMainWindow):
         mask = get_hand_region(self.aktuelles_hand_mesh, pfad)
         mask = schliesse_maske(self.aktuelles_hand_mesh, mask, schritte = 2)
         flaeche = extract_faces_of_hand(self.aktuelles_hand_mesh, mask)
-        save_drawn_area(flaeche, Path(self.aktueller_ordner), "grün", {})
-
-        self.lade_und_zeige(Path(self.aktueller_ordner))
-        self.hinweis_label.setText(f"Fläche erkannt und gespeichert ({len(pfad)} Randpunkte).")
+        self.zeichnungs_status["flaeche"] = flaeche
+        self.zeichnungs_status["landmarken"] = {}
+        self.malen_wahl_container.setVisible(False)
+        self.haupt_buttons_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(True)
 
     def bereich_vermessen_start(self):
         if self.aktueller_ordner is None:
@@ -623,9 +627,28 @@ class HauptFenster(QMainWindow):
             return True
         return super().eventFilter(obj, event)
 
+
+    #--- heatmap und Genesungsverlauf -----
+
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
         heatmap_main(str(self.aktueller_ordner))
+
+    def genesungsverlauf_3d_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+
+        ergebnisse = baue_3d_genesungsverlauf(self.aktuelles_hand_mesh, str(self.aktueller_ordner))
+        if not ergebnisse:
+            self.hinweis_label.setText("Keine markierten Untersuchungen für diesen Patienten gefunden.")
+            return
+
+        for i, (punkte_3d, farbe_rgb) in enumerate(ergebnisse):
+            farbe_hex = f"#{farbe_rgb[0]:02X}{farbe_rgb[1]:02X}{farbe_rgb[2]:02X}"
+            self.plotter.add_points(punkte_3d, color=farbe_hex, point_size=10, render_points_as_spheres=True, name=f"genesungsverlauf_{i}")
+
+        self.hinweis_label.setText(f"Genesungsverlauf: {len(ergebnisse)} Untersuchungen auf den aktuellen Scan übertragen.")
 
