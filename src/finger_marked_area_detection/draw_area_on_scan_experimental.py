@@ -5,9 +5,6 @@ import numpy as np
 import vtk
 from PIL import Image 
 import heatmap
-from scipy.sparse import csr_matrix
-from scipy.sparse.csgraph import connected_components
-from scipy.spatial import cKDTree
 
 HEATMAPFARBEN = {
     "rot" : (220, 20, 20),
@@ -195,24 +192,6 @@ def get_hand_region(hand_mesh, circle_points):
 
     return result["Selection"] < 0
 
-
-def entferne_ausreisser_punkte(punkte: np.ndarray, min_cluster_groesse: int = 10) -> np.ndarray:
-
-    baum = cKDTree(punkte)
-    distanzen, _ = baum.query(punkte, k=2)
-    typischer_abstand = np.median(distanzen[:, 1])
-    max_nachbar_distanz = typischer_abstand * 5
-
-    paare = baum.query_pairs(r=max_nachbar_distanz, output_type='ndarray')
-    n = len(punkte)
-    daten = np.ones(len(paare))
-    matrix = csr_matrix((daten, (paare[:, 0], paare[:, 1])), shape=(n, n))
-    matrix = matrix + matrix.T
-
-    anzahl, labels = connected_components(matrix, directed=False)
-    groessen = np.bincount(labels)
-    groesstes_label = np.argmax(groessen)
-    return punkte[labels == groesstes_label]
 
 
 

@@ -321,6 +321,41 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
     print(f"Isolierter Finger ({len(geometrien)} Materialien) gespeichert unter: {save_path}")
     return return_ordner
 
+def isolate_finger_parameter_datei_pfad(scan_ordner: Path) -> Path:
+        #Pfad zur Parameterdatei, siehe Ordnerstruktur.pdf (Update ich bald)
+        patienten_ordner = scan_ordner.parent.parent
+        return patienten_ordner / "pat_parameter" / "isolate_finger_parameter.txt"
+
+
+def lade_isolate_finger_parameter(scan_ordner: Path) -> dict | None:
+    pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
+    if not pfad.exists():
+        return None
+                
+    werte = {}
+    for zeile in pfad.read_text().splitlines():
+        if "=" not in zeile:
+            continue
+        name, wert = zeile.split("=")
+        werte[name.strip()] = float(wert.strip())
+
+    return werte     
+
+def speichere_isolate_finger_parameter(
+            scan_ordner: Path, 
+            radius_faktor: float,
+            laengen_faktor: float, 
+            unterschreitung: float) -> Path:
+    
+    pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
+    pfad.parent.mkdir(parents=True, exist_ok=True)
+    pfad.write_text(
+        f"radius_faktor={radius_faktor}\n"
+        f"laengen_faktor={laengen_faktor}\n"
+        f"unterschreitung={unterschreitung}\n"
+    )
+    return pfad
+
 ###!!! Der Spaß ist jetzt n Generator, also mit "for _ in isoltae_finer(...): \n\tab pass" aufrufen!!!
 
 def isolate_finger(path: str,
