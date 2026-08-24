@@ -1,8 +1,3 @@
-import os
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
-import PySide6
-qt_lib_pfad = os.path.join(os.path.dirname(PySide6.__file__), "Qt", "lib")
-os.environ["LD_LIBRARY_PATH"] = qt_lib_pfad + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
 
 import sys
 import pyvista as p_v
@@ -10,20 +5,44 @@ import numpy as np
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QMainWindow, QApplication, QLabel, QVBoxLayout, QWidget, QHBoxLayout,
-    QPushButton, QSlider, QTreeView, QFileSystemModel, QLineEdit)
-from PySide6.QtCore import QDir, Qt, QEvent
+    QMainWindow, 
+    QApplication, 
+    QLabel, 
+    QVBoxLayout, 
+    QWidget, 
+    QHBoxLayout,
+    QPushButton, 
+    QSlider, 
+    QTreeView, 
+    QFileSystemModel, 
+    QLineEdit)
+from PySide6.QtCore import (
+    QDir, 
+    Qt, 
+    QEvent)
 from pyvistaqt import QtInteractor
 
 from theme import QSS
 from utils import generator_bis_ende
-from farberkennung import finde_markierungs_punkte, entferne_ausreisser_punkte, baue_geschlossenen_pfad
-from messungen import berechne_flaeche_und_umfang, volumen_ab_markierung
+from farberkennung import (
+    finde_markierungs_punkte, 
+    entferne_ausreisser_punkte, 
+    baue_geschlossenen_pfad)
+from messungen import (
+    berechne_flaeche_und_umfang, 
+    volumen_ab_markierung)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
-    load_teilmeshe_mit_textur, isolate_finger, erstelle_schnitt_ellipsoid,
-    lade_isolate_finger_parameter, speichere_isolate_finger_parameter)
-from draw_area_on_scan_experimental import draw_main, save_drawn_area, extract_faces_of_hand, get_hand_region
+    load_teilmeshe_mit_textur, 
+    isolate_finger, 
+    erstelle_schnitt_ellipsoid,
+    lade_isolate_finger_parameter, 
+    speichere_isolate_finger_parameter)
+from draw_area_on_scan_experimental import (
+    draw_main, 
+    save_drawn_area, 
+    extract_faces_of_hand, 
+    get_hand_region)
 from heatmap import heatmap_main
 
 
@@ -556,10 +575,3 @@ class HauptFenster(QMainWindow):
             return
         heatmap_main(str(self.aktueller_ordner))
 
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setStyleSheet(QSS)
-    fenster = HauptFenster()
-    fenster.show()
-    sys.exit(app.exec())
