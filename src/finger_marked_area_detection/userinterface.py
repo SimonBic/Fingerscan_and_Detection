@@ -41,14 +41,13 @@ from isolate_finger import (
     erstelle_schnitt_ellipsoid,
     lade_isolate_finger_parameter, 
     speichere_isolate_finger_parameter)
-from draw_area_on_scan_experimental import (
+from draw_area_on_scan import (
     draw_main, 
     save_drawn_area, 
     extract_faces_of_hand, 
     get_hand_region,
     lese_markierungsfarbe)
-from heatmap import (
-    heatmap_main,
+from heatmap3D import (
     baue_3d_genesungsverlauf,
     speichere_genesungsverlauf,
     finde_markierte_scans,
@@ -58,6 +57,7 @@ from heatmap import (
     isolierte_scan_name_aus_markierung,
     baue_farbgruppen_aus_gewinner,
     farb_prioritaet)
+from heatmap2D import heatmap_main
 
 
 class HauptFenster(QMainWindow):
@@ -95,8 +95,8 @@ class HauptFenster(QMainWindow):
         self.button_isolieren = self._knopf("Finger isolieren", self.isolieren_klick, haupt_buttons_layout)
         self.button_zeichnen = self._knopf("Bereich einzeichnen", self.zeichnen_klick, haupt_buttons_layout)
         self.button_vermessen = self._knopf("Bereich / Strecke \nvermessen", self.vermessen_klick, haupt_buttons_layout)
-        self.button_heatmap = self._knopf("Heatmap erzeugen", self.heatmap_klick, haupt_buttons_layout)
-        self.button_genesungsverlauf = self._knopf("3D Genesungsverlauf\nanzeigen", self.genesungsverlauf_3d_klick, haupt_buttons_layout)
+        self.button_heatmap = self._knopf("2D Heatmap /\nGenesungsverlauf\nerzeugen", self.heatmap_klick, haupt_buttons_layout)
+        self.button_genesungsverlauf = self._knopf("3D Heatmap/\nGenesungsverlauf\nerzeugen", self.genesungsverlauf_3d_klick, haupt_buttons_layout)
         self.knopf_layout.addWidget(self.haupt_buttons_container)
 
         # --- Isolieren-Wahl ---
@@ -330,7 +330,7 @@ class HauptFenster(QMainWindow):
 
     def isolieren_klick(self):
         if self.aktueller_ordner is None:
-            self.hinweis_label.setText("Erst einen Scan laden")
+            self.hinweis_label.setText("Erst einen Scan laden!")
             return
         self.zeige_basis_mesh_neu()
         self.button_automatisch.setVisible(True)
@@ -674,13 +674,16 @@ class HauptFenster(QMainWindow):
         return super().eventFilter(obj, event)
 
 
-    #--- heatmap und Genesungsverlauf -----
+    #--- heatmap -----
 
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
         heatmap_main(str(self.aktueller_ordner))
+
+
+    #--- Genesungsverlauf ---
 
     def genesungsverlauf_3d_klick(self):
         if self.aktueller_ordner is None:
