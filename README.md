@@ -70,6 +70,12 @@ Scan-Ordner lassen sich per Drag-and-Drop reinziehen oder über den eingebauten 
 
 ## Installation und Verwendung Windows und MacOS
 
+Getestet auf Windows 10, funktioniert, so lange man die Anleitung unten befolgt. 
+
+Falls jemand die Softwareinstallation auf MacOS testen kann, dann wäre ich dankbar für eine kurze Rückmeldung in Form eines pull requests oder Issue über etwaige Fehlercodes oder über ein erfolgreiche Installation.
+
+Ich habe die requirements extra für Windows und MacOS angepasst, dass auch für diese OS's die packages verfügbar sind.
+
 
 ### Schritt 1: Programm herunterladen
 
