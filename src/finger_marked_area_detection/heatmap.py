@@ -7,7 +7,14 @@ from PIL import Image
 from scipy.spatial import cKDTree
 import re
 
-from draw_area_on_scan_experimental import lese_markierungsfarbe, extract_faces_of_hand
+from draw_area_on_scan_experimental import lese_markierungsfarbe, extract_faces_of_hand, HEATMAPFARBEN
+
+FARB_REIHENFOLGE = ["rot", "orange", "gelb", "grün", "blau"]
+FARB_PRIORITAET = {HEATMAPFARBEN[name]: index for index, name in enumerate(FARB_REIHENFOLGE)}
+
+
+def farb_prioritaet(farbe_rgb: tuple) -> int:
+    return FARB_PRIORITAET.get(farbe_rgb, -1)
 
 
 def finde_nagel_normale(mesh: p_v.PolyData, geklickter_punkt: np.ndarray, k: int = 400) -> np.ndarray:

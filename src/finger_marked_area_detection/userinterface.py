@@ -56,7 +56,8 @@ from heatmap import (
     finde_nagel_normale,
     rotationsmatrix_um_z_fuer_nagel_ausrichtung,
     isolierte_scan_name_aus_markierung,
-    baue_farbgruppen_aus_gewinner)
+    baue_farbgruppen_aus_gewinner,
+    farb_prioritaet)
 
 
 class HauptFenster(QMainWindow):
@@ -761,18 +762,24 @@ class HauptFenster(QMainWindow):
 
         normale = finde_nagel_normale(mesh, geklickter_punkt)
         R = rotationsmatrix_um_z_fuer_nagel_ausrichtung(normale)
+        versatz = self._genesungsverlauf_hoehen_versatz(mesh)   
 
         if eintrag["typ"] == "aktuell":
+            rotierte_punkte = (R @ self.aktuelles_hand_mesh.points.T).T
+            rotierte_punkte[:, 2] += versatz   
             self.genesungsverlauf_aktuell_rotiert = self.aktuelles_hand_mesh.copy()
-            self.genesungsverlauf_aktuell_rotiert.points = (R @ self.aktuelles_hand_mesh.points.T).T
+            self.genesungsverlauf_aktuell_rotiert.points = rotierte_punkte
         else:
             try:
                 markierung_punkte = lade_markierung(eintrag["markierungs_pfad"])
                 farbe = lese_markierungsfarbe(eintrag["markierungs_pfad"])
                 markierung_rotiert = (R @ markierung_punkte.T).T
+                markierung_rotiert[:, 2] += versatz  
                 for p in markierung_rotiert:
                     vertex_index = self.genesungsverlauf_aktuell_rotiert.find_closest_point(p)
-                    self.genesungsverlauf_gewinner[vertex_index] = farbe
+                    bisherige_farbe = self.genesungsverlauf_gewinner.get(vertex_index)
+                    if farb_prioritaet(farbe) > farb_prioritaet(bisherige_farbe):
+                        self.genesungsverlauf_gewinner[vertex_index] = farbe
             except ValueError as e:
                 print(f"Überspringe: {e}")
 
@@ -796,6 +803,10 @@ class HauptFenster(QMainWindow):
         )
         self.hinweis_label.setText(f"Genesungsverlauf erstellt und gespeichert: {save_path.parent.name}")
 
+
+    def _genesungsverlauf_hoehen_versatz(self, mesh, ziel_hoehe=30):
+        #Verstz auf Höhe, dass die Fingerspitze auf Höhe 30 ist, dass die Höhe genau passt
+        return ziel_hoehe - mesh.bounds[5]
 
     def genesungsverlauf_speichern_klick(self):
         if self.aktueller_ordner is None:
