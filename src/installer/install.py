@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from PIL import Image
 
 INSTALLER_ORDNER = Path(__file__).resolve().parent
 REPO_ORDNER = INSTALLER_ORDNER.parent.parent
@@ -84,35 +83,39 @@ def abhaengigkeiten_installieren() -> None:
 
 
 def windows_icon_einrichten() -> None:
-    """Erzeugt eine .lnk-Verknuepfung mit echtem Icon auf dem Desktop
-    UND im Startmenue - ueber PowerShell (WScript.Shell), damit KEINE
-    zusaetzliche Python-Abhaengigkeit (z.B. pywin32) noetig ist, die
-    ausserdem nur unter Windows installierbar waere."""
     ico_pfad = INSTALLER_ORDNER / "logo.ico"
-    bild = Image.open(LOGO_PNG_PFAD)
-    bild.save(ico_pfad, sizes=[(16, 16), (32, 32), (48, 48), (128, 128), (256, 256)])
+
+    # Laeuft ueber die VENV-Python (dort ist Pillow schon installiert),
+    # NICHT ueber die System-Python, die install.py selbst ausfuehrt
+    konvertier_skript = (
+        f'from PIL import Image; '
+        f'Image.open(r"{LOGO_PNG_PFAD}").save(r"{ico_pfad}", '
+        f'sizes=[(16,16),(32,32),(48,48),(128,128),(256,256)])'
+    )
+    subprocess.run([str(VENV_PYTHON), "-c", konvertier_skript], check=True)
     print(f"Icon erzeugt: {ico_pfad}")
 
     main_py_pfad = APP_ORDNER / "main.py"
 
     ps_skript = f'''
-$WshShell = New-Object -comObject WScript.Shell
+        $WshShell = New-Object -comObject WScript.Shell
 
-$ZielPfade = @(
-    "$env:USERPROFILE\\Desktop\\Fingerscan Viewer.lnk",
-    "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Fingerscan Viewer.lnk"
-)
+        $ZielPfade = @(
+            "$env:USERPROFILE\\Desktop\\Fingerscan Viewer.lnk",
+            "$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Fingerscan Viewer.lnk"
+        )
 
-foreach ($Pfad in $ZielPfade) {{
-    $Shortcut = $WshShell.CreateShortcut($Pfad)
-    $Shortcut.TargetPath = "{VENV_PYTHON}"
-    $Shortcut.Arguments = '"{main_py_pfad}"'
-    $Shortcut.WorkingDirectory = "{APP_ORDNER}"
-    $Shortcut.IconLocation = "{ico_pfad}"
-    $Shortcut.Save()
-    Write-Host "Verknuepfung angelegt: $Pfad"
-}}
-'''
+        foreach ($Pfad in $ZielPfade) {{
+            $Shortcut = $WshShell.CreateShortcut($Pfad)
+            $Shortcut.TargetPath = "{VENV_PYTHON}"
+            $Shortcut.Arguments = '"{main_py_pfad}"'
+            $Shortcut.WorkingDirectory = "{APP_ORDNER}"
+            $Shortcut.IconLocation = "{ico_pfad}"
+            $Shortcut.Save()
+            Write-Host "Verknuepfung angelegt: $Pfad"
+        }}
+        '''
+    
     ps_datei = INSTALLER_ORDNER / "_verknuepfung_erstellen.ps1"
     ps_datei.write_text(ps_skript)
 
@@ -124,16 +127,17 @@ foreach ($Pfad in $ZielPfade) {{
 
 
 def macos_app_bundle_einrichten() -> None:
-    """Baut ein minimales .app-Bundle mit echtem Icon (.icns) auf dem
-    Desktop - 'iconutil' ist ein in macOS eingebautes Werkzeug, keine
-    zusaetzliche Installation noetig."""
     iconset_ordner = INSTALLER_ORDNER / "Icon.iconset"
     iconset_ordner.mkdir(exist_ok=True)
 
-    bild = Image.open(LOGO_PNG_PFAD).convert("RGBA")
-    for groesse in (16, 32, 128, 256, 512):
-        bild.resize((groesse, groesse)).save(iconset_ordner / f"icon_{groesse}x{groesse}.png")
-        bild.resize((groesse * 2, groesse * 2)).save(iconset_ordner / f"icon_{groesse}x{groesse}@2x.png")
+    konvertier_skript = f'''
+        from PIL import Image
+        bild = Image.open(r"{LOGO_PNG_PFAD}").convert("RGBA")
+        for groesse in (16, 32, 128, 256, 512):
+            bild.resize((groesse, groesse)).save(r"{iconset_ordner}/icon_{{}}x{{}}.png".format(groesse, groesse))
+            bild.resize((groesse*2, groesse*2)).save(r"{iconset_ordner}/icon_{{}}x{{}}@2x.png".format(groesse, groesse))
+        '''
+    subprocess.run([str(VENV_PYTHON), "-c", konvertier_skript], check=True)
 
     icns_pfad = INSTALLER_ORDNER / "logo.icns"
     subprocess.run(["iconutil", "-c", "icns", str(iconset_ordner), "-o", str(icns_pfad)], check=True)

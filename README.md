@@ -68,8 +68,7 @@ Das Skript legt eine eigene virtuelle Umgebung an, installiert alle Pakete in ex
 
 Scan-Ordner lassen sich per Drag-and-Drop reinziehen oder über den eingebauten Ordner-Browser links unten öffnen.
 
-## Installation und Verwendung
-
+## Installation und Verwendung Windows und MacOS
 
 
 ### Schritt 1: Programm herunterladen
