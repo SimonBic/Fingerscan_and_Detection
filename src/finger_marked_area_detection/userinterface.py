@@ -48,7 +48,8 @@ from draw_area_on_scan_experimental import (
     get_hand_region)
 from heatmap import (
     heatmap_main,
-    baue_3d_genesungsverlauf)
+    baue_3d_genesungsverlauf,
+    speichere_genesungsverlauf)
 
 
 class HauptFenster(QMainWindow):
@@ -203,6 +204,18 @@ class HauptFenster(QMainWindow):
         viewer_layout.addWidget(self.plotter.interactor)
         haupt_layout.addWidget(self.viewer_spalte, stretch=4)
 
+        # --- Buttons im Viewer, oben rechts ---
+        self.overlay_buttons = []
+
+        self.button_speichere_genesungsverlauf_overlay = QPushButton("Genesungsverlauf\nspeichern", self.viewer_spalte)
+        self.button_speichere_genesungsverlauf_overlay.setFixedSize(160, 80)
+        self.button_speichere_genesungsverlauf_overlay.setVisible(False)
+        self.button_speichere_genesungsverlauf_overlay.clicked.connect(self.genesungsverlauf_speichern_klick)
+        self.overlay_buttons.append(self.button_speichere_genesungsverlauf_overlay)
+
+        self.viewer_spalte.installEventFilter(self)
+        self._positioniere_overlay_buttons()
+
     # ---------- kleine Bau-Helfer ----------
 
     def _knopf(self, text: str, funktion, ziel_layout) -> QPushButton:
@@ -220,6 +233,15 @@ class HauptFenster(QMainWindow):
         ziel_layout.addWidget(label)
         ziel_layout.addWidget(slider)
         return slider
+
+
+    def _positioniere_overlay_buttons(self):
+        rand = 10
+        y = rand
+        for button in self.overlay_buttons:
+            button.move(self.viewer_spalte.width() - button.width() - rand, y)
+            button.raise_()
+            y += button.height() + rand 
 
     # ---------- Drag & Drop / Laden ----------
 
@@ -596,7 +618,8 @@ class HauptFenster(QMainWindow):
 
         self.hinweis_label.setText(
             f"Volumen ab der Höhe der Fingerzwischenfalte: {volumen:.1f} mm³")
-    # ---------- Pipette ----------
+        
+    # ---------- Pipette & Overlay Buttons ----------
 
     def pipette_aktivieren(self, ziel_widget: FarbAuswahlWidget):
         self._pipette_aktiv = True
@@ -606,6 +629,10 @@ class HauptFenster(QMainWindow):
         self.hinweis_label.setText("Pipette aktiv - auf den Scan klicken, um eine Farbe aufzunehmen.")
 
     def eventFilter(self, obj, event):
+        if obj is self.viewer_spalte and event.type() == QEvent.Resize:
+            self._positioniere_overlay_buttons()                             
+            return super().eventFilter(obj, event)   
+    
         if getattr(self, "_pipette_aktiv", False) and obj is self.plotter.interactor and event.type() == QEvent.MouseButtonPress:
             self._pipette_aktiv = False
             self.plotter.interactor.unsetCursor()
@@ -646,9 +673,18 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Keine markierten Untersuchungen für diesen Patienten gefunden.")
             return
 
+        self.button_speichere_genesungsverlauf_overlay.setVisible(True)
         for i, (punkte_3d, farbe_rgb) in enumerate(ergebnisse):
             farbe_hex = f"#{farbe_rgb[0]:02X}{farbe_rgb[1]:02X}{farbe_rgb[2]:02X}"
             self.plotter.add_points(punkte_3d, color=farbe_hex, point_size=10, render_points_as_spheres=True, name=f"genesungsverlauf_{i}")
 
         self.hinweis_label.setText(f"Genesungsverlauf: {len(ergebnisse)} Untersuchungen auf den aktuellen Scan übertragen.")
 
+    def genesungsverlauf_speichern_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+
+        save_path = speichere_genesungsverlauf(self.aktuelles_hand_mesh, self.aktuelle_teile, str(self.aktueller_ordner))
+        self.hinweis_label.setText(f"Genesungsverlauf gespeichert: {save_path.parent.name}")
+        self.button_speichere_genesungsverlauf_overlay.setVisible(False)

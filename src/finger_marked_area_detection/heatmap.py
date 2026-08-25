@@ -3,8 +3,9 @@ import numpy as np
 import trimesh
 import pyvista as p_v
 import matplotlib.pyplot as plt
+from PIL import Image
 
-from draw_area_on_scan_experimental import lese_markierungsfarbe
+from draw_area_on_scan_experimental import lese_markierungsfarbe, extract_faces_of_hand
 
 
 def punkt_abwickeln(punkt: np.ndarray) -> tuple:
@@ -87,20 +88,10 @@ def heatmap_main(path: str):
 
 
 def baue_3d_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, path: str) -> list:
-    # Findet fuer JEDEN Punkt JEDER frueheren Markierung den
-    # naechstgelegenen Punkt auf dem AKTUELLEN Scan (direkt in 3D,
-    # ohne Umweg ueber 2D-Koordinaten) - funktioniert, weil alle
-    # isolierten Scans desselben Patienten in derselben kanonischen
-    # Ausrichtung liegen (berechne_finale_ausrichtung), auch wenn der
-    # Finger bei jeder Untersuchung etwas anders gehalten wurde.
-
-    # Gibt eine Liste von (3D-Punkte-Array, RGB-Farbe) zurueck, eine
-    # pro gefundener Untersuchungs-Markierung - zum direkten Anzeigen
-    # im Plotter (z.B. per plotter.add_points(punkte, color=farbe))
     scan_ordner = Path(path)
     patienten_ordner = scan_ordner.parent.parent
-
-    ergebnisse = []
+ 
+    gewinner_pro_vertex = {}
     for obj_pfad in finde_markierte_scans(patienten_ordner):
         try:
             punkte = lade_markierung(obj_pfad)
@@ -108,10 +99,77 @@ def baue_3d_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, path: str) -> li
         except ValueError as e:
             print(f"Ueberspringe {obj_pfad.name}: {e}")
             continue
-
-        naechste_indices = [aktueller_scan_mesh.find_closest_point(p) for p in punkte]
-        naechste_punkte = aktueller_scan_mesh.points[naechste_indices]
-
-        ergebnisse.append((naechste_punkte, farbe_rgb))
-
-    return ergebnisse
+ 
+        for p in punkte:
+            vertex_index = aktueller_scan_mesh.find_closest_point(p)
+            # 'finde_markierte_scans' liefert die Dateien sortiert
+            # (chronologisch, da U1/U2/... alphabetisch gleich sortiert) -
+            # ein spaeterer Eintrag ueberschreibt hier also IMMER einen
+            # frueheren fuer denselben Vertex
+            gewinner_pro_vertex[vertex_index] = farbe_rgb
+ 
+    punkte_pro_farbe = {}
+    for vertex_index, farbe_rgb in gewinner_pro_vertex.items():
+        punkte_pro_farbe.setdefault(farbe_rgb, []).append(aktueller_scan_mesh.points[vertex_index])
+ 
+    return [(np.array(punkte), farbe) for farbe, punkte in punkte_pro_farbe.items()]
+ 
+ 
+def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile: list, path: str) -> Path:
+    scan_ordner = Path(path)
+    patienten_ordner = scan_ordner.parent.parent
+ 
+    gewinner_pro_vertex = {}
+    for obj_pfad in finde_markierte_scans(patienten_ordner):
+        try:
+            punkte = lade_markierung(obj_pfad)
+            farbe_rgb = lese_markierungsfarbe(obj_pfad)
+        except ValueError:
+            continue
+        for p in punkte:
+            vertex_index = aktueller_scan_mesh.find_closest_point(p)
+            gewinner_pro_vertex[vertex_index] = farbe_rgb
+ 
+    farben_gruppen = {}
+    for vertex_index, farbe in gewinner_pro_vertex.items():
+        farben_gruppen.setdefault(farbe, []).append(vertex_index)
+ 
+    geometrien = {}
+ 
+    # Pro noch verbliebener Farbe eine eigene, eingefaerbte Flaeche bauen
+    for i, (farbe, indices) in enumerate(farben_gruppen.items()):
+        maske = np.zeros(aktueller_scan_mesh.n_points, dtype=bool)
+        maske[indices] = True
+        flaeche = extract_faces_of_hand(aktueller_scan_mesh, maske)
+        if flaeche.n_points == 0:
+            continue
+ 
+        faces = flaeche.faces.reshape(-1, 4)[:, 1:]
+        tmesh = trimesh.Trimesh(vertices=flaeche.points, faces=faces, process=False)
+        tmesh.remove_unreferenced_vertices()
+ 
+        farb_bild = Image.new("RGB", (64, 64), farbe)
+        uv = np.full((len(tmesh.vertices), 2), 0.5)
+        tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=farb_bild)
+        geometrien[f"genesungsverlauf_{i}"] = tmesh
+ 
+    # Original-Scan-Teile MIT ihrer echten Textur dazupacken
+    for i, (pv_mesh, tex) in enumerate(aktuelle_teile):
+        faces = pv_mesh.faces.reshape(-1, 4)[:, 1:]
+        tmesh = trimesh.Trimesh(vertices=pv_mesh.points, faces=faces, process=False)
+        uv = pv_mesh.active_texture_coordinates
+        bild = Image.fromarray(tex.to_array())
+        tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=bild)
+        geometrien[f"scan_teil_{i}"] = tmesh
+ 
+    scene = trimesh.Scene(geometrien)
+ 
+    save_name = scan_ordner.name + "_genesungsverlauf"
+    ziel_ordner = patienten_ordner / "genesungsverlauf" / save_name
+    ziel_ordner.mkdir(parents=True, exist_ok=True)
+    save_path = ziel_ordner / f"{save_name}.obj"
+    scene.export(str(save_path))
+ 
+    print(f"Genesungsverlauf gespeichert unter: {save_path}")
+    return save_path
+ 
