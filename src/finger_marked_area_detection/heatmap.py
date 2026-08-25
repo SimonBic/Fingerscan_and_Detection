@@ -4,8 +4,45 @@ import trimesh
 import pyvista as p_v
 import matplotlib.pyplot as plt
 from PIL import Image
+from scipy.spatial import cKDTree
+import re
 
 from draw_area_on_scan_experimental import lese_markierungsfarbe, extract_faces_of_hand
+
+
+def finde_nagel_normale(mesh: p_v.PolyData, geklickter_punkt: np.ndarray, k: int = 400) -> np.ndarray:
+    #PCA auf die lokale Nachbarschaft um den geklickten Fingernagel-
+    #Punkt - gibt die lokale Oberflaechen-Normale zurueck (Richtung
+    #der KLEINSTEN Streuung, da eine Nagel-Oberflaeche lokal recht
+    
+    baum = cKDTree(mesh.points)
+    _, indices = baum.query(geklickter_punkt, k=k)
+    nahe_punkte = mesh.points[indices]
+    zentriert = nahe_punkte - nahe_punkte.mean(axis=0)
+    kovarianz = np.cov(zentriert.T)
+    eigenwerte, eigenvektoren = np.linalg.eigh(kovarianz)
+    normale = eigenvektoren[:, np.argmin(eigenwerte)]
+ 
+    fusspunkt_auf_achse = np.array([0, 0, geklickter_punkt[2]])
+    nach_aussen = geklickter_punkt - fusspunkt_auf_achse
+    if np.dot(normale, nach_aussen) < 0:
+        normale = -normale
+    return normale
+
+
+def rotationsmatrix_um_z_fuer_nagel_ausrichtung(normale: np.ndarray) -> np.ndarray:
+    # Rotationsmatrix um die Z-Achse, die die (XY-Projektion der)
+    # Nagel-Normale exakt auf die positive Y-Achse dreht
+
+    winkel_aktuell = np.arctan2(normale[1], normale[0])
+    winkel_korrektur = np.pi / 2 - winkel_aktuell
+    c, s = np.cos(winkel_korrektur), np.sin(winkel_korrektur)
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+
+def isolierte_scan_name_aus_markierung(markierungs_ordner_name: str) -> str:
+    #Leitet aus zb 'U1_isoliert_marked' den zugehoerigen isolierte_scans-Ordnernamen 'U1_isoliert' ab
+    return re.sub(r"_marked(_\d+)?$", "", markierungs_ordner_name)
 
 
 def punkt_abwickeln(punkt: np.ndarray) -> tuple:
@@ -87,6 +124,14 @@ def heatmap_main(path: str):
     plt.show()
 
 
+def baue_farbgruppen_aus_gewinner(aktueller_scan_mesh: p_v.PolyData, gewinner_pro_vertex: dict) -> list:
+    punkte_pro_farbe = {}
+    for vertex_index, farbe_rgb in gewinner_pro_vertex.items():
+        punkte_pro_farbe.setdefault(farbe_rgb, []).append(aktueller_scan_mesh.points[vertex_index])
+ 
+    return [(np.array(punkte), farbe) for farbe, punkte in punkte_pro_farbe.items()]
+
+
 def baue_3d_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, path: str) -> list:
     scan_ordner = Path(path)
     patienten_ordner = scan_ordner.parent.parent
@@ -115,20 +160,9 @@ def baue_3d_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, path: str) -> li
     return [(np.array(punkte), farbe) for farbe, punkte in punkte_pro_farbe.items()]
  
  
-def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile: list, path: str) -> Path:
+def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile: list, gewinner_pro_vertex: dict, path: str) -> Path:
     scan_ordner = Path(path)
     patienten_ordner = scan_ordner.parent.parent
- 
-    gewinner_pro_vertex = {}
-    for obj_pfad in finde_markierte_scans(patienten_ordner):
-        try:
-            punkte = lade_markierung(obj_pfad)
-            farbe_rgb = lese_markierungsfarbe(obj_pfad)
-        except ValueError:
-            continue
-        for p in punkte:
-            vertex_index = aktueller_scan_mesh.find_closest_point(p)
-            gewinner_pro_vertex[vertex_index] = farbe_rgb
  
     farben_gruppen = {}
     for vertex_index, farbe in gewinner_pro_vertex.items():
@@ -136,7 +170,7 @@ def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile
  
     geometrien = {}
  
-    # Pro noch verbliebener Farbe eine eigene, eingefaerbte Flaeche bauen
+    # Pro Farbe eine eigene, eingefaerbte Flaeche bauen
     for i, (farbe, indices) in enumerate(farben_gruppen.items()):
         maske = np.zeros(aktueller_scan_mesh.n_points, dtype=bool)
         maske[indices] = True
@@ -172,4 +206,5 @@ def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile
  
     print(f"Genesungsverlauf gespeichert unter: {save_path}")
     return save_path
+ 
  

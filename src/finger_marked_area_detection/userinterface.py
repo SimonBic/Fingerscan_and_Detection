@@ -45,11 +45,18 @@ from draw_area_on_scan_experimental import (
     draw_main, 
     save_drawn_area, 
     extract_faces_of_hand, 
-    get_hand_region)
+    get_hand_region,
+    lese_markierungsfarbe)
 from heatmap import (
     heatmap_main,
     baue_3d_genesungsverlauf,
-    speichere_genesungsverlauf)
+    speichere_genesungsverlauf,
+    finde_markierte_scans,
+    lade_markierung,
+    finde_nagel_normale,
+    rotationsmatrix_um_z_fuer_nagel_ausrichtung,
+    isolierte_scan_name_aus_markierung,
+    baue_farbgruppen_aus_gewinner)
 
 
 class HauptFenster(QMainWindow):
@@ -68,6 +75,11 @@ class HauptFenster(QMainWindow):
         self.ellipsoid_kontext = None
         self.aktueller_ellipsoid_actor = None
         self.isolieren_phase = None
+        self.genesungsverlauf_warteschlange = []
+        self.genesungsverlauf_index = 0
+        self.genesungsverlauf_gewinner = {}
+        self.genesungsverlauf_aktuell_rotiert = None
+        self._genesungsverlauf_mesh_fuer_klick = None
 
         zentral_widget = QWidget()
         self.setCentralWidget(zentral_widget)
@@ -212,6 +224,12 @@ class HauptFenster(QMainWindow):
         self.button_speichere_genesungsverlauf_overlay.setVisible(False)
         self.button_speichere_genesungsverlauf_overlay.clicked.connect(self.genesungsverlauf_speichern_klick)
         self.overlay_buttons.append(self.button_speichere_genesungsverlauf_overlay)
+
+        self.button_naechster_finger_overlay = QPushButton("Nächsten Finger\nmarkieren", self.viewer_spalte)
+        self.button_naechster_finger_overlay.setFixedSize(160, 80)
+        self.button_naechster_finger_overlay.clicked.connect(self.naechster_finger_markieren_klick)
+        self.button_naechster_finger_overlay.setVisible(False)   
+        self.overlay_buttons.append(self.button_naechster_finger_overlay)
 
         self.viewer_spalte.installEventFilter(self)
         self._positioniere_overlay_buttons()
@@ -668,17 +686,116 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
 
-        ergebnisse = baue_3d_genesungsverlauf(self.aktuelles_hand_mesh, str(self.aktueller_ordner))
-        if not ergebnisse:
-            self.hinweis_label.setText("Keine markierten Untersuchungen für diesen Patienten gefunden.")
+        scan_ordner = Path(self.aktueller_ordner)
+        patienten_ordner = scan_ordner.parent.parent
+
+        self.genesungsverlauf_warteschlange = [{"typ": "aktuell"}]
+
+        for obj_pfad in finde_markierte_scans(patienten_ordner):
+            isolierter_name = isolierte_scan_name_aus_markierung(obj_pfad.parent.name)
+            isolierter_pfad = patienten_ordner / "isolierte_scans" / isolierter_name
+            if not isolierter_pfad.is_dir():
+                print(f"Überspringe {obj_pfad.name}: zugehöriger isolierter Scan nicht gefunden.")
+                continue
+            self.genesungsverlauf_warteschlange.append({
+                "typ": "untersuchung",
+                "isolierter_pfad": isolierter_pfad,
+                "markierungs_pfad": obj_pfad,
+            })
+
+        if len(self.genesungsverlauf_warteschlange) < 2:
+            self.hinweis_label.setText("Keine weiteren markierten Untersuchungen für diesen Patienten gefunden.")
             return
 
-        self.button_speichere_genesungsverlauf_overlay.setVisible(True)
-        for i, (punkte_3d, farbe_rgb) in enumerate(ergebnisse):
-            farbe_hex = f"#{farbe_rgb[0]:02X}{farbe_rgb[1]:02X}{farbe_rgb[2]:02X}"
-            self.plotter.add_points(punkte_3d, color=farbe_hex, point_size=10, render_points_as_spheres=True, name=f"genesungsverlauf_{i}")
+        self.genesungsverlauf_index = 0
+        self.genesungsverlauf_gewinner = {}
+        self._genesungsverlauf_naechsten_schritt_zeigen()
 
-        self.hinweis_label.setText(f"Genesungsverlauf: {len(ergebnisse)} Untersuchungen auf den aktuellen Scan übertragen.")
+
+    def _genesungsverlauf_naechsten_schritt_zeigen(self):
+        eintrag = self.genesungsverlauf_warteschlange[self.genesungsverlauf_index]
+
+        if eintrag["typ"] == "aktuell":
+            self._genesungsverlauf_mesh_fuer_klick = self.aktuelles_hand_mesh
+            self.zeige_basis_mesh_neu()
+        else:
+            teile = load_teilmeshe_mit_textur(list(eintrag["isolierter_pfad"].glob("*.obj")))
+            self._genesungsverlauf_mesh_fuer_klick = p_v.merge([teil for teil, tex in teile])
+            self.plotter.clear()
+            for pv_mesh, tex in teile:
+                self.plotter.add_mesh(pv_mesh, texture=tex)
+            self.plotter.reset_camera()
+
+        self.hinweis_label.setText(
+            f"Genesungsverlauf ({self.genesungsverlauf_index + 1}/{len(self.genesungsverlauf_warteschlange)}): "
+            f"Fingernagel anklicken."
+        )
+        self.button_naechster_finger_overlay.setVisible(True)
+        self._positioniere_overlay_buttons()
+        self._genesungsverlauf_picking_aktivieren()
+
+
+    def _genesungsverlauf_picking_aktivieren(self):
+        self.plotter.disable_picking()
+
+        def nagel_geklickt(punkt, picker):
+            self.plotter.disable_picking()
+            self._genesungsverlauf_nagel_verarbeiten(np.array(punkt))
+
+        self.plotter.enable_point_picking(
+            callback=nagel_geklickt, use_picker=True, show_point=True, color="yellow", point_size=15
+        )
+
+
+    def naechster_finger_markieren_klick(self):
+        """Overlay-Button: bei Fehlklick den AKTUELLEN Schritt einfach
+        nochmal anzeigen, ohne in der Warteschlange weiterzugehen."""
+        if not self.genesungsverlauf_warteschlange:
+            return
+        self._genesungsverlauf_naechsten_schritt_zeigen()
+
+
+    def _genesungsverlauf_nagel_verarbeiten(self, geklickter_punkt):
+        eintrag = self.genesungsverlauf_warteschlange[self.genesungsverlauf_index]
+        mesh = self._genesungsverlauf_mesh_fuer_klick
+
+        normale = finde_nagel_normale(mesh, geklickter_punkt)
+        R = rotationsmatrix_um_z_fuer_nagel_ausrichtung(normale)
+
+        if eintrag["typ"] == "aktuell":
+            self.genesungsverlauf_aktuell_rotiert = self.aktuelles_hand_mesh.copy()
+            self.genesungsverlauf_aktuell_rotiert.points = (R @ self.aktuelles_hand_mesh.points.T).T
+        else:
+            try:
+                markierung_punkte = lade_markierung(eintrag["markierungs_pfad"])
+                farbe = lese_markierungsfarbe(eintrag["markierungs_pfad"])
+                markierung_rotiert = (R @ markierung_punkte.T).T
+                for p in markierung_rotiert:
+                    vertex_index = self.genesungsverlauf_aktuell_rotiert.find_closest_point(p)
+                    self.genesungsverlauf_gewinner[vertex_index] = farbe
+            except ValueError as e:
+                print(f"Überspringe: {e}")
+
+        self.genesungsverlauf_index += 1
+        if self.genesungsverlauf_index < len(self.genesungsverlauf_warteschlange):
+            self._genesungsverlauf_naechsten_schritt_zeigen()
+        else:
+            self._genesungsverlauf_abschliessen()
+
+
+    def _genesungsverlauf_abschliessen(self):
+        self.button_naechster_finger_overlay.setVisible(False)
+        self.zeige_basis_mesh_neu()
+
+        for punkte, farbe in baue_farbgruppen_aus_gewinner(self.aktuelles_hand_mesh, self.genesungsverlauf_gewinner):
+            farbe_hex = f"#{farbe[0]:02X}{farbe[1]:02X}{farbe[2]:02X}"
+            self.plotter.add_points(punkte, color=farbe_hex, point_size=10, render_points_as_spheres=True)
+
+        save_path = speichere_genesungsverlauf(
+            self.aktuelles_hand_mesh, self.aktuelle_teile, self.genesungsverlauf_gewinner, str(self.aktueller_ordner)
+        )
+        self.hinweis_label.setText(f"Genesungsverlauf erstellt und gespeichert: {save_path.parent.name}")
+
 
     def genesungsverlauf_speichern_klick(self):
         if self.aktueller_ordner is None:
