@@ -220,17 +220,23 @@ class HauptFenster(QMainWindow):
         # --- Buttons im Viewer, oben rechts ---
         self.overlay_buttons = []
 
-        self.button_speichere_genesungsverlauf_overlay = QPushButton("Genesungsverlauf\nspeichern", self.viewer_spalte)
-        self.button_speichere_genesungsverlauf_overlay.setFixedSize(160, 80)
-        self.button_speichere_genesungsverlauf_overlay.setVisible(False)
-        self.button_speichere_genesungsverlauf_overlay.clicked.connect(self.genesungsverlauf_speichern_klick)
-        self.overlay_buttons.append(self.button_speichere_genesungsverlauf_overlay)
+        # self.button_speichere_genesungsverlauf_overlay = QPushButton("Genesungsverlauf\nspeichern", self.viewer_spalte)
+        # self.button_speichere_genesungsverlauf_overlay.setFixedSize(160, 80)
+        # self.button_speichere_genesungsverlauf_overlay.setVisible(False)
+        # self.button_speichere_genesungsverlauf_overlay.clicked.connect(self.genesungsverlauf_speichern_klick)
+        # self.overlay_buttons.append(self.button_speichere_genesungsverlauf_overlay)
 
         self.button_naechster_finger_overlay = QPushButton("Nächsten Finger\nmarkieren", self.viewer_spalte)
         self.button_naechster_finger_overlay.setFixedSize(160, 80)
         self.button_naechster_finger_overlay.clicked.connect(self.naechster_finger_markieren_klick)
         self.button_naechster_finger_overlay.setVisible(False)   
         self.overlay_buttons.append(self.button_naechster_finger_overlay)
+
+        self.button_abbruch_overlay = QPushButton("Abbrechen", self.viewer_spalte)
+        self.button_abbruch_overlay.setFixedSize(160, 80)
+        self.button_abbruch_overlay.setVisible(False)
+        self.button_abbruch_overlay.clicked.connect(self.lade_main_menu)
+        self.overlay_buttons.append(self.button_abbruch_overlay)
 
         self.viewer_spalte.installEventFilter(self)
         self._positioniere_overlay_buttons()
@@ -320,6 +326,8 @@ class HauptFenster(QMainWindow):
         self.vermessung_wahl_container.setVisible(False)
         self.navigatecontainer.setVisible(False)
         self.volumen_container.setVisible(False)
+        for button in (self.overlay_buttons):
+            button.setVisible(False)
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.plotter.disable_picking()
         self._pipette_aktiv = False
@@ -693,7 +701,10 @@ class HauptFenster(QMainWindow):
         scan_ordner = Path(self.aktueller_ordner)
         patienten_ordner = scan_ordner.parent.parent
 
-        self.genesungsverlauf_warteschlange = [{"typ": "aktuell"}]
+        self.button_abbruch_overlay.setVisible(True)
+
+        andere_eintraege = []
+        aktueller_eintrag = None
 
         for obj_pfad in finde_markierte_scans(patienten_ordner):
             isolierter_name = isolierte_scan_name_aus_markierung(obj_pfad.parent.name)
@@ -701,25 +712,35 @@ class HauptFenster(QMainWindow):
             if not isolierter_pfad.is_dir():
                 print(f"Überspringe {obj_pfad.name}: zugehöriger isolierter Scan nicht gefunden.")
                 continue
-            self.genesungsverlauf_warteschlange.append({
-                "typ": "untersuchung",
-                "isolierter_pfad": isolierter_pfad,
-                "markierungs_pfad": obj_pfad,
-            })
 
-        if len(self.genesungsverlauf_warteschlange) < 2:
-            self.hinweis_label.setText("Keine weiteren markierten Untersuchungen für diesen Patienten gefunden.")
+            eintrag = {"isolierter_pfad": isolierter_pfad, "markierungs_pfad": obj_pfad}
+            if isolierter_pfad.resolve() == scan_ordner.resolve():
+                aktueller_eintrag = eintrag   # das IST der aktuelle Scan - merken, nicht doppelt aufnehmen
+            else:
+                andere_eintraege.append(eintrag)
+
+        if aktueller_eintrag is None:
+            # Aktueller Scan hat selbst noch keine Markierung - trotzdem
+            # als reiner Referenz-Eintrag noetig (kein markierungs_pfad)
+            aktueller_eintrag = {"isolierter_pfad": scan_ordner, "markierungs_pfad": None}
+
+        self.genesungsverlauf_warteschlange = [aktueller_eintrag] + andere_eintraege
+
+        if len(self.genesungsverlauf_warteschlange) < 2 and aktueller_eintrag["markierungs_pfad"] is None:
+            self.hinweis_label.setText("Keine markierten Untersuchungen für diesen Patienten gefunden.")
             return
 
         self.genesungsverlauf_index = 0
         self.genesungsverlauf_gewinner = {}
+        self.genesungsverlauf_aktuell_rotiert = None
+        self._genesungsverlauf_letzter_klick = None
         self._genesungsverlauf_naechsten_schritt_zeigen()
-
 
     def _genesungsverlauf_naechsten_schritt_zeigen(self):
         eintrag = self.genesungsverlauf_warteschlange[self.genesungsverlauf_index]
+        ist_aktuell = eintrag["isolierter_pfad"].resolve() == Path(self.aktueller_ordner).resolve()
 
-        if eintrag["typ"] == "aktuell":
+        if ist_aktuell:
             self._genesungsverlauf_mesh_fuer_klick = self.aktuelles_hand_mesh
             self.zeige_basis_mesh_neu()
         else:
@@ -730,54 +751,62 @@ class HauptFenster(QMainWindow):
                 self.plotter.add_mesh(pv_mesh, texture=tex)
             self.plotter.reset_camera()
 
+        self._genesungsverlauf_letzter_klick = None   
         self.hinweis_label.setText(
             f"Genesungsverlauf ({self.genesungsverlauf_index + 1}/{len(self.genesungsverlauf_warteschlange)}): "
-            f"Fingernagel anklicken."
+            f"Fingernagel anklicken, dann 'Nächsten Finger markieren' zum Bestätigen."
         )
         self.button_naechster_finger_overlay.setVisible(True)
         self._positioniere_overlay_buttons()
         self._genesungsverlauf_picking_aktivieren()
 
-
     def _genesungsverlauf_picking_aktivieren(self):
         self.plotter.disable_picking()
 
         def nagel_geklickt(punkt, picker):
-            self.plotter.disable_picking()
-            self._genesungsverlauf_nagel_verarbeiten(np.array(punkt))
+            self._genesungsverlauf_letzter_klick = np.array(punkt)   
+            self.plotter.add_points(
+                np.array([punkt]), color="yellow", point_size=15,
+                render_points_as_spheres=True, name="genesungsverlauf_nagel_marker"  
+            )
 
         self.plotter.enable_point_picking(
-            callback=nagel_geklickt, use_picker=True, show_point=True, color="yellow", point_size=15
+            callback=nagel_geklickt, use_picker=True, show_point=False 
         )
 
-
     def naechster_finger_markieren_klick(self):
-        """Overlay-Button: bei Fehlklick den AKTUELLEN Schritt einfach
-        nochmal anzeigen, ohne in der Warteschlange weiterzugehen."""
         if not self.genesungsverlauf_warteschlange:
             return
-        self._genesungsverlauf_naechsten_schritt_zeigen()
+        if self._genesungsverlauf_letzter_klick is None:
+            self.hinweis_label.setText("Bitte zuerst den Fingernagel anklicken.")
+            return
+
+        self.plotter.disable_picking()
+        self._genesungsverlauf_nagel_verarbeiten(self._genesungsverlauf_letzter_klick)
 
 
     def _genesungsverlauf_nagel_verarbeiten(self, geklickter_punkt):
         eintrag = self.genesungsverlauf_warteschlange[self.genesungsverlauf_index]
         mesh = self._genesungsverlauf_mesh_fuer_klick
-
+        ist_aktuell = eintrag["isolierter_pfad"].resolve() == Path(self.aktueller_ordner).resolve()
+        print(  f"DEBUG: Index={self.genesungsverlauf_index}, ist_aktuell={ist_aktuell}, "
+                f"aktuell_rotiert vorhanden={self.genesungsverlauf_aktuell_rotiert is not None}")   
         normale = finde_nagel_normale(mesh, geklickter_punkt)
         R = rotationsmatrix_um_z_fuer_nagel_ausrichtung(normale)
-        versatz = self._genesungsverlauf_hoehen_versatz(mesh)   
+        versatz = self._genesungsverlauf_hoehen_versatz(mesh)
 
-        if eintrag["typ"] == "aktuell":
+        if ist_aktuell:
             rotierte_punkte = (R @ self.aktuelles_hand_mesh.points.T).T
-            rotierte_punkte[:, 2] += versatz   
+            rotierte_punkte[:, 2] += versatz
             self.genesungsverlauf_aktuell_rotiert = self.aktuelles_hand_mesh.copy()
             self.genesungsverlauf_aktuell_rotiert.points = rotierte_punkte
-        else:
+
+        if eintrag["markierungs_pfad"] is not None:
             try:
                 markierung_punkte = lade_markierung(eintrag["markierungs_pfad"])
                 farbe = lese_markierungsfarbe(eintrag["markierungs_pfad"])
                 markierung_rotiert = (R @ markierung_punkte.T).T
-                markierung_rotiert[:, 2] += versatz  
+                markierung_rotiert[:, 2] += versatz
                 for p in markierung_rotiert:
                     vertex_index = self.genesungsverlauf_aktuell_rotiert.find_closest_point(p)
                     bisherige_farbe = self.genesungsverlauf_gewinner.get(vertex_index)
@@ -805,6 +834,7 @@ class HauptFenster(QMainWindow):
             self.aktuelles_hand_mesh, self.aktuelle_teile, self.genesungsverlauf_gewinner, str(self.aktueller_ordner)
         )
         self.hinweis_label.setText(f"Genesungsverlauf erstellt und gespeichert: {save_path.parent.name}")
+        self.button_abbruch_overlay.setVisible(False)
 
 
     def _genesungsverlauf_hoehen_versatz(self, mesh, ziel_hoehe=30):
