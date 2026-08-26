@@ -238,6 +238,9 @@ class HauptFenster(QMainWindow):
         self.button_abbruch_overlay.clicked.connect(self.lade_main_menu)
         self.overlay_buttons.append(self.button_abbruch_overlay)
 
+        self.button_abbruch_overlay.setObjectName("overlay_button")
+        self.button_naechster_finger_overlay.setObjectName("overlay_button")
+
         self.viewer_spalte.installEventFilter(self)
         self._positioniere_overlay_buttons()
 
@@ -824,18 +827,34 @@ class HauptFenster(QMainWindow):
 
     def _genesungsverlauf_abschliessen(self):
         self.button_naechster_finger_overlay.setVisible(False)
+        self.button_abbruch_overlay.setVisible(False)
         self.zeige_basis_mesh_neu()
 
-        for punkte, farbe in baue_farbgruppen_aus_gewinner(self.aktuelles_hand_mesh, self.genesungsverlauf_gewinner):
+        #self.genesungsverlauf_gewinner = bereinige_gewinner(self.aktuelles_hand_mesh, self.genesungsverlauf_gewinner)
+
+        
+        farben_gruppen = {}
+        for vertex_index, farbe in self.genesungsverlauf_gewinner.items():
+            farben_gruppen.setdefault(farbe, []).append(vertex_index)
+
+        for farbe, indices in farben_gruppen.items():
+            maske = np.zeros(self.aktuelles_hand_mesh.n_points, dtype=bool)
+            maske[indices] = True
+            flaeche = extract_faces_of_hand(self.aktuelles_hand_mesh, maske)
+            if flaeche.n_points == 0:
+                continue
+
+            flaeche = flaeche.clean()
+            flaeche = flaeche.compute_normals(point_normals=True, auto_orient_normals=True)
+            flaeche.points = flaeche.points + flaeche.point_normals * 0.3
+
             farbe_hex = f"#{farbe[0]:02X}{farbe[1]:02X}{farbe[2]:02X}"
-            self.plotter.add_points(punkte, color=farbe_hex, point_size=10, render_points_as_spheres=True)
+            self.plotter.add_mesh(flaeche, color=farbe_hex, opacity=1.0)
 
         save_path = speichere_genesungsverlauf(
             self.aktuelles_hand_mesh, self.aktuelle_teile, self.genesungsverlauf_gewinner, str(self.aktueller_ordner)
         )
         self.hinweis_label.setText(f"Genesungsverlauf erstellt und gespeichert: {save_path.parent.name}")
-        self.button_abbruch_overlay.setVisible(False)
-
 
     def _genesungsverlauf_hoehen_versatz(self, mesh, ziel_hoehe=30):
         #Verstz auf Höhe, dass die Fingerspitze auf Höhe 30 ist, dass die Höhe genau passt

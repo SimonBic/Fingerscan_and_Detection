@@ -131,6 +131,11 @@ def speichere_genesungsverlauf(aktueller_scan_mesh: p_v.PolyData, aktuelle_teile
         flaeche = extract_faces_of_hand(aktueller_scan_mesh, maske)
         if flaeche.n_points == 0:
             continue
+
+        flaeche = flaeche.clean()
+        flaeche = flaeche.compute_normals(point_normals=True, auto_orient_normals=True)
+        flaeche.points = flaeche.points + flaeche.point_normals * 0.3
+
  
         faces = flaeche.faces.reshape(-1, 4)[:, 1:]
         tmesh = trimesh.Trimesh(vertices=flaeche.points, faces=faces, process=False)
