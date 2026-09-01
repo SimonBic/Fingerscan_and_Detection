@@ -33,7 +33,8 @@ from messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
     volumen_ab_ring, 
-    volumen_ab_fingerzwischenfalte)
+    volumen_ab_fingerzwischenfalte,
+    volumen_gesamtes_mesh)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
     load_teilmeshe_mit_textur, 
@@ -161,10 +162,10 @@ class HauptFenster(QMainWindow):
         # --- Volumen-Container ---
         self.volumen_container = QWidget()
         volumen_layout = QVBoxLayout(self.volumen_container)
-        self._knopf("Gesamtes Volumen\nberechnen", self.volumen_ganzes_mesh_messen_klick, volumen_layout)
-        self._knopf("Volumen über\nmarkierter Fläche\nberechnen", self.volumen_alles_ueber_markierung, volumen_layout)
-        self._knopf("Volumen ab\nGummiring\nberechnen", self.volumen_ueber_ring, volumen_layout)
-        self._knopf("Volumen ab Höhe\nder Fingerzwischenfalte\n messen", self.volumen_ab_fingerzwischenfalte_klick, volumen_layout)
+        self._knopf("Gesamtes Volumen\nberechnen", self.volumen_ganzes_mesh_messen_klick, volumen_layout, x = 192, y = 60)
+        self._knopf("Volumen über markierter\n Fläche berechnen", self.volumen_alles_ueber_markierung, volumen_layout, x = 192, y = 60)
+        self._knopf("Volumen ab\nGummiring berechnen", self.volumen_ueber_ring, volumen_layout, x = 192, y = 60)
+        self._knopf("Volumen ab Höhe der\nZwischnfingerfalte", self.volumen_ab_fingerzwischenfalte_klick, volumen_layout, x = 192, y = 60)
 
         self.markierung_farbwahl = FarbAuswahlWidget(standard_farbe="#DD11ED")
         self.markierung_farbwahl.button_pipette.clicked.connect(
@@ -246,9 +247,9 @@ class HauptFenster(QMainWindow):
 
     # ---------- kleine Bau-Helfer ----------
 
-    def _knopf(self, text: str, funktion, ziel_layout) -> QPushButton:
+    def _knopf(self, text: str, funktion, ziel_layout, x = 192, y = 108) -> QPushButton:
         button = QPushButton(text)
-        button.setFixedSize(192, 108)
+        button.setFixedSize(x, y)
         button.clicked.connect(funktion)
         ziel_layout.addWidget(button)
         return button
@@ -566,7 +567,12 @@ class HauptFenster(QMainWindow):
                 self.navigatecontainer.setVisible(False)
                 self.haupt_buttons_container.setVisible(True)
 
-        self.plotter.enable_point_picking(callback=punkt_geklickt, use_picker=True, show_point=True, color="red", point_size=20)
+        self.plotter.enable_point_picking(callback=punkt_geklickt, 
+                                          tolerance = 0.01,  
+                                          use_picker=True, 
+                                          show_point=True, 
+                                          color="red", 
+                                          point_size=20)
 
     def volumen_messen_klick(self):
         self.volumen_container.setVisible(True)
@@ -577,7 +583,11 @@ class HauptFenster(QMainWindow):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
-        volumen = self.aktuelles_hand_mesh.volume
+        elif "iso" not in str(self.aktueller_ordner):
+            self.hinweis_label.setText("Erst den Finger isolieren")
+            return
+        
+        volumen = volumen_gesamtes_mesh(self.aktuelles_hand_mesh)
         self.hinweis_label.setText(f"Volumen des gesamten Mesh: {volumen:.1f} mm³")
 
     def volumen_alles_ueber_markierung(self):
@@ -774,7 +784,10 @@ class HauptFenster(QMainWindow):
             )
 
         self.plotter.enable_point_picking(
-            callback=nagel_geklickt, use_picker=True, show_point=False 
+            callback=nagel_geklickt, 
+            tolerance = 0.01,
+            use_picker=True, 
+            show_point=False 
         )
 
     def naechster_finger_markieren_klick(self):
