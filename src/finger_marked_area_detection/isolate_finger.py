@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from sympy import python
 import trimesh
+import vtk
 from scipy.spatial import cKDTree
 from PIL import Image
 
@@ -215,10 +216,35 @@ def transformiere_teile(teile: list, transform_matrix) -> list:
     return [(teil.transform(transform_matrix, inplace=False), farben) for teil, farben in teile]
  
  
+def clip_mit_strikter_toleranz(mesh: p_v.PolyData, flaeche: p_v.PolyData, invert: bool = False) -> p_v.PolyData:
+    # pyvista.clip_surface() benutzt intern vtkClipPolyData mit einem
+    # Standard-Locator, dessen Verschmelzungstoleranz relativ grosszuegig ist.
+    # Das kann an echten UV-Nahtstellen (absichtlich doppelte Punkte an
+    # exakt gleicher 3D-Position, aber mit unterschiedlicher UV-Koordinate)
+    # neu erzeugte Schnittpunkte faelschlich mit dem falschen Nachbarn
+    # verschmelzen und dadurch die UV-Zuordnung an der Schnittkante zerstoeren.
+    # Deshalb hier ein eigener Locator mit (praktisch) keiner Toleranz.
+    funktion = vtk.vtkImplicitPolyDataDistance()
+    funktion.SetInput(flaeche)
+
+    locator = vtk.vtkMergePoints()
+    locator.SetTolerance(0.0)
+
+    alg = vtk.vtkClipPolyData()
+    alg.SetInputDataObject(mesh)
+    alg.SetClipFunction(funktion)
+    alg.SetInsideOut(invert)
+    alg.SetValue(0.0)
+    alg.SetLocator(locator)
+    alg.Update()
+
+    return p_v.wrap(alg.GetOutput())
+
+
 def clippe_teile(teile: list, zylinder: p_v.PolyData) -> list:
     ergebnis = []
     for teil, farben in teile:
-        geschnitten = teil.clip_surface(zylinder, invert = False)
+        geschnitten = clip_mit_strikter_toleranz(teil, zylinder, invert=False)
         if geschnitten.n_points > 0:
             ergebnis.append((geschnitten, farben))
     return ergebnis
@@ -346,7 +372,7 @@ def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_pun
             f"anzahl_punkte ({anzahl_punkte}) ist größer als die Gesamtzahl "
             f"der Vertices im Mesh ({mesh.n_points})."
         )
- 
+
     baum = cKDTree(mesh.points)
     _, indices = baum.query(verletzter_finger, k = anzahl_punkte)
     nahe_punkte = mesh.points[indices]
@@ -458,29 +484,27 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
         faces = dreiecks_mesh.faces.reshape(-1, 4)[:, 1:]
  
         if tex is not None:
-            # Texturiertes Teil (JPG/PNG): Farbe pro Vertex aus der
-            # Textur an der jeweiligen UV-Koordinate sampeln.
+            # Texturiertes Teil (JPG/PNG): echte Textur exportieren,
+            # damit die volle Bildaufloesung erhalten bleibt (statt
+            # nur ein Farbwert pro Vertex).
             uv = np.asarray(dreiecks_mesh.active_texture_coordinates)
-            bild_array = tex.to_array()
-            hoehe, breite = bild_array.shape[:2]
+            bild = Image.fromarray(tex.to_array())
 
-            # UV -> Pixelkoordinaten. V ist gegenueber dem Bild-Array
-            # invertiert (UV-Ursprung unten links, Array-Ursprung oben links).
-            px = np.clip((uv[:, 0] * (breite - 1)).round().astype(int), 0, breite - 1)
-            py = np.clip(((1 - uv[:, 1]) * (hoehe - 1)).round().astype(int), 0, hoehe - 1)
-            farben = bild_array[py, px]
+            tmesh = trimesh.Trimesh(
+                vertices=dreiecks_mesh.points, faces=faces, process=False)
+            tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=bild)
 
         elif "RGB" in dreiecks_mesh.point_data:
             # Teil hat bereits Vertex-Farben, keine Textur.
             farben = np.asarray(dreiecks_mesh.point_data["RGB"])
+            tmesh = trimesh.Trimesh(
+                vertices=dreiecks_mesh.points, faces=faces,
+                vertex_colors=farben, process=False)
 
         else:
             print(f"Warnung: Teil {i} hat weder Textur noch Vertex-Farben, wird uebersprungen.")
             continue
 
-        tmesh = trimesh.Trimesh(
-            vertices=dreiecks_mesh.points, faces=faces,
-            vertex_colors=farben, process=False)
         geometrien[f"teil_{i}"] = tmesh
 
     if not geometrien:
@@ -647,7 +671,11 @@ def isolate_finger(path: str,
     return markierungsordner
 
 # path_string = input("Pfad eingeben:")
-# isolate_finger(path_string)
+# isolate_finger(path_string, plotter = p_v.Plotter(), 
+#                 radius_faktor = 2.0, 
+#                 laengen_faktor = 0.8, 
+#                 unterschreitung = 0.45, 
+#                 zeige_zwischenschritte = True)
 
 
 
