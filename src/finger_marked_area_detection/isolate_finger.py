@@ -538,17 +538,19 @@ def lade_isolate_finger_parameter(scan_ordner: Path) -> dict | None:
     return werte     
 
 def speichere_isolate_finger_parameter(
-            scan_ordner: Path, 
+            scan_ordner: Path,
             radius_faktor: float,
-            laengen_faktor: float, 
-            unterschreitung: float) -> Path:
-    
+            laengen_faktor: float,
+            unterschreitung: float,
+            anzahl_punkte_pca: float = 3000) -> Path:
+
     pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
     pfad.parent.mkdir(parents=True, exist_ok=True)
     pfad.write_text(
         f"radius_faktor={radius_faktor}\n"
         f"laengen_faktor={laengen_faktor}\n"
         f"unterschreitung={unterschreitung}\n"
+        f"anzahl_punkte_pca={anzahl_punkte_pca}\n"
     )
     return pfad
 
@@ -559,6 +561,7 @@ def isolate_finger(path: str,
                 radius_faktor = 2.0,
                 laengen_faktor = 0.8,
                 unterschreitung = 0.45,
+                anzahl_punkte_pca = 3000,
                 zeige_zwischenschritte = True):
     path = Path(path)
 
@@ -608,7 +611,9 @@ def isolate_finger(path: str,
     tiefster_punkt, pfad_mesh, kugel = djikstra_und_tiefster_punkt(hand_ausgerichtet, hurt_finger, second_finger)
 
     #Normale mit PCA (still, kein Zwischenschritt mehr)
-    normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(hand_ausgerichtet, hurt_finger, 3000)
+    normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
+        hand_ausgerichtet, hurt_finger, int(anzahl_punkte_pca)
+    )
 
     #Einziger verbleibender Zwischenschritt: Ellipsoid live einstellbar.
     if zeige_zwischenschritte and plotter is not None:
@@ -622,11 +627,21 @@ def isolate_finger(path: str,
             "normale": normale,
             "verwendete_vertices": verwendete_vertices,
             "tiefster_punkt": tiefster_punkt,
+            "hand_ausgerichtet": hand_ausgerichtet,
+            "hurt_finger": hurt_finger,
+            "anzahl_punkte_pca": anzahl_punkte_pca,
         }
         if empfangene_werte is not None:
             radius_faktor = empfangene_werte.get("radius_faktor", radius_faktor)
             laengen_faktor = empfangene_werte.get("laengen_faktor", laengen_faktor)
             unterschreitung = empfangene_werte.get("unterschreitung", unterschreitung)
+
+            neue_anzahl_punkte_pca = empfangene_werte.get("anzahl_punkte_pca", anzahl_punkte_pca)
+            if neue_anzahl_punkte_pca != anzahl_punkte_pca:
+                anzahl_punkte_pca = neue_anzahl_punkte_pca
+                normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
+                    hand_ausgerichtet, hurt_finger, int(anzahl_punkte_pca)
+                )
 
     elif zeige_zwischenschritte:
         ellipsoid_vorschau = erstelle_schnitt_ellipsoid(

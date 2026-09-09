@@ -37,10 +37,11 @@ from messungen import (
     volumen_gesamtes_mesh)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
-    load_teilmeshe_mit_textur, 
-    isolate_finger, 
+    load_teilmeshe_mit_textur,
+    isolate_finger,
     erstelle_schnitt_ellipsoid,
-    lade_isolate_finger_parameter, 
+    finger_normale,
+    lade_isolate_finger_parameter,
     speichere_isolate_finger_parameter)
 from draw_area_on_scan import (
     draw_main, 
@@ -114,6 +115,8 @@ class HauptFenster(QMainWindow):
         self.slider_laenge = self._ellipsoid_slider(30, 150, 80, ellipsoid_layout, self.label_laenge)
         self.label_unterschreitung = QLabel("Unterschreitung: 0.45")
         self.slider_unterschreitung = self._ellipsoid_slider(0, 100, 45, ellipsoid_layout, self.label_unterschreitung)
+        self.label_pca_punkte = QLabel("PCA-Punkte: 3000")
+        self.slider_pca_punkte = self._ellipsoid_slider(200, 20000, 3000, ellipsoid_layout, self.label_pca_punkte)
         self.button_ellipsoid_bestaetigen = self._knopf("Bestätigen", self.ellipsoid_bestaetigen_klick, ellipsoid_layout)
         self.knopf_layout.addWidget(self.ellipsoid_einstellen_container)
         self.ellipsoid_einstellen_container.setVisible(False)
@@ -449,9 +452,22 @@ class HauptFenster(QMainWindow):
         radius_faktor = self.slider_radius.value() / 100
         laengen_faktor = self.slider_laenge.value() / 100
         unterschreitung = self.slider_unterschreitung.value() / 100
+        anzahl_punkte_pca = self.slider_pca_punkte.value()
         self.label_radius.setText(f"Breite: {radius_faktor:.2f}")
         self.label_laenge.setText(f"Länge: {laengen_faktor:.2f}")
         self.label_unterschreitung.setText(f"Unterschreitung: {unterschreitung:.2f}")
+        self.label_pca_punkte.setText(f"PCA-Punkte: {anzahl_punkte_pca}")
+
+        if anzahl_punkte_pca != self.ellipsoid_kontext.get("anzahl_punkte_pca"):
+            normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
+                self.ellipsoid_kontext["hand_ausgerichtet"],
+                self.ellipsoid_kontext["hurt_finger"],
+                anzahl_punkte_pca,
+            )
+            self.ellipsoid_kontext["normale"] = normale
+            self.ellipsoid_kontext["verwendete_vertices"] = verwendete_vertices
+            self.ellipsoid_kontext["avg_point_of_hurt_finger"] = avg_point_of_hurt_finger
+            self.ellipsoid_kontext["anzahl_punkte_pca"] = anzahl_punkte_pca
 
         ellipsoid = erstelle_schnitt_ellipsoid(
             self.ellipsoid_kontext["avg_point_of_hurt_finger"],
@@ -468,6 +484,7 @@ class HauptFenster(QMainWindow):
             "radius_faktor": self.slider_radius.value() / 100,
             "laengen_faktor": self.slider_laenge.value() / 100,
             "unterschreitung": self.slider_unterschreitung.value() / 100,
+            "anzahl_punkte_pca": self.slider_pca_punkte.value(),
         }
         ordner = Path(self.aktueller_ordner)
         self.ellipsoid_einstellen_container.setVisible(False)
