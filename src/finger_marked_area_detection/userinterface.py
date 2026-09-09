@@ -301,26 +301,55 @@ class HauptFenster(QMainWindow):
             self.aktueller_ordner = str(pfad)
             self.lade_und_zeige(pfad)
 
-    def lade_und_zeige(self, ordner: Path):
-        try:
-            obj_file = list(ordner.glob("*.obj"))
-            teile = load_teilmeshe_mit_textur(obj_file)
-        except Exception as e:
-            self.hinweis_label.setText(f"Fehler beim Laden (ui, lade_und_zeige): {e}")
+    def _rendere_teile(self, teile: list) -> None:
+        for pv_mesh, tex in teile:
+
+            if tex is not None:
+                # -----------------------------------------
+                # Mesh besitzt eine JPG/PNG-Textur
+                # -----------------------------------------
+                self.plotter.add_mesh(
+                    pv_mesh,
+                    texture=tex,
+                    smooth_shading=False
+                )
+
+            elif "RGB" in pv_mesh.point_data:
+                # -----------------------------------------
+                # Mesh besitzt Vertex-Farben
+                # -----------------------------------------
+                self.plotter.add_mesh(
+                    pv_mesh,
+                    scalars="RGB",
+                    rgb=True,
+                    smooth_shading=True
+                )
+
+            else:
+                # -----------------------------------------
+                # Fallback: Mesh ohne Farbe/Textur
+                # -----------------------------------------
+                self.plotter.add_mesh(
+                    pv_mesh,
+                    smooth_shading=False
+                )
+
+    def lade_und_zeige(self, pfad: Path):
+        self.plotter.clear()
+        teile = load_teilmeshe_mit_textur(pfad)
+
+        if not teile:
+            print("Keine gültigen Meshes gefunden.")
             return
 
         self.aktuelle_teile = teile
         self.aktuelles_hand_mesh = p_v.merge([teil for teil, tex in teile])
-        self.plotter.clear()
-        for pv_mesh, tex in teile:
-            self.plotter.add_mesh(pv_mesh, texture=tex)
-        self.plotter.reset_camera()
-        self.hinweis_label.setText(f"Geladen: {ordner.name}")
+
+        self._rendere_teile(teile)
 
     def zeige_basis_mesh_neu(self):
         self.plotter.clear()
-        for pv_mesh, tex in self.aktuelle_teile:
-            self.plotter.add_mesh(pv_mesh, texture=tex)
+        self._rendere_teile(self.aktuelle_teile)
 
     def lade_main_menu(self):
         self.haupt_buttons_container.setVisible(True)
@@ -757,11 +786,10 @@ class HauptFenster(QMainWindow):
             self._genesungsverlauf_mesh_fuer_klick = self.aktuelles_hand_mesh
             self.zeige_basis_mesh_neu()
         else:
-            teile = load_teilmeshe_mit_textur(list(eintrag["isolierter_pfad"].glob("*.obj")))
+            teile = load_teilmeshe_mit_textur(eintrag["isolierter_pfad"])
             self._genesungsverlauf_mesh_fuer_klick = p_v.merge([teil for teil, tex in teile])
             self.plotter.clear()
-            for pv_mesh, tex in teile:
-                self.plotter.add_mesh(pv_mesh, texture=tex)
+            self._rendere_teile(teile)
             self.plotter.reset_camera()
 
         self._genesungsverlauf_letzter_klick = None   

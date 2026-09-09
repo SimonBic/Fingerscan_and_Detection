@@ -1,6 +1,7 @@
 import pyvista as p_v
 import numpy as np
 from pathlib import Path
+from sympy import python
 import trimesh
 from scipy.spatial import cKDTree
 from PIL import Image
@@ -17,54 +18,209 @@ def hole_textur_bild(material):
     return Image.new("RGB", (8, 8), farbe_rgb)
 
 
+
 def load_teilmeshe_mit_textur(obj_pfad: str):
-    geladen = trimesh.load(str(obj_pfad[0]), process=False)
- 
+    # obj_pfad ist der Ordner
+    obj_dateien = list(obj_pfad.glob("*.obj"))
+
+    if not obj_dateien:
+        print(f"Keine OBJ-Datei gefunden in: {obj_pfad}")
+        return []
+
+    if len(obj_dateien) > 1:
+        print(f"Mehrere OBJ-Dateien gefunden: {obj_dateien}")
+
+    obj_datei = obj_dateien[0]
+
+    geladen = trimesh.load(str(obj_datei), process=False)
+
+    print("OBJ:", obj_pfad)
+    print("Typ:", type(geladen))
+
     if isinstance(geladen, trimesh.Scene):
         teile = list(geladen.geometry.values())
     else:
         teile = [geladen]
- 
+
     count_vertices = 0
     ergebnis = []
+
     for tmesh in teile:
-        if tmesh.visual.uv is None:
-            print(f"Teilmesh ohne UV-Koordinaten gefunden.")
+
+        print(
+            "Teilmesh:",
+            "Vertices:", len(tmesh.vertices),
+            "Faces:", len(tmesh.faces),
+            "Visual:", type(tmesh.visual),
+            "Vertex colors:",
+            getattr(tmesh.visual, "vertex_colors", None) is not None,
+            "UV:",
+            getattr(tmesh.visual, "uv", None) is not None,
+        )
+
+        # ==========================================================
+        # FALL 1: Vertex-Farben vorhanden
+        # ==========================================================
+        vertex_farben = getattr(tmesh.visual, "vertex_colors", None)
+
+        if vertex_farben is not None and len(vertex_farben) == len(tmesh.vertices):
+            print("→ Mesh mit Vertex-Farben gefunden.")
+
+            vertex_farben = np.asarray(vertex_farben)[:, :3]
+
+            faces_vtk = np.hstack(
+                [
+                    np.full((len(tmesh.faces), 1), 3),
+                    tmesh.faces
+                ]
+            ).astype(np.int64)
+
+            count_vertices += len(tmesh.vertices)
+
+            pv_mesh = p_v.PolyData(
+                tmesh.vertices,
+                faces_vtk
+            )
+
+            pv_mesh.point_data["RGB"] = vertex_farben
+
+            pv_mesh = pv_mesh.compute_normals(
+                point_normals=True,
+                auto_orient_normals=True
+            )
+
+            # Bei Vertex-Farben bleibt tex None
+            ergebnis.append((pv_mesh, None))
+
             continue
 
-        faces_vtk = np.hstack(
-            [np.full((len(tmesh.faces), 1), 3), tmesh.faces]
-        ).astype(np.int64)
+        # ==========================================================
+        # FALL 2: Textur vorhanden (PNG/JPG)
+        # ==========================================================
+        uv = getattr(tmesh.visual, "uv", None)
+        material = getattr(tmesh.visual, "material", None)
 
-        count_vertices += len(tmesh.vertices)
-        pv_mesh = p_v.PolyData(tmesh.vertices, faces_vtk)
-        pv_mesh.active_texture_coordinates = tmesh.visual.uv
-        pv_mesh = pv_mesh.compute_normals(point_normals=True, auto_orient_normals=True)
- 
-        bild_array = np.array(hole_textur_bild(tmesh.visual.material))
-        tex = p_v.Texture(bild_array)
- 
-        ergebnis.append((pv_mesh, tex))
- 
-    print(f"Erfolgreich geladen, {count_vertices} Vertices gesamt.")
+        if uv is not None and material is not None:
+            print("→ Texturiertes Mesh gefunden.")
+
+            faces_vtk = np.hstack(
+                [
+                    np.full((len(tmesh.faces), 1), 3),
+                    tmesh.faces
+                ]
+            ).astype(np.int64)
+
+            count_vertices += len(tmesh.vertices)
+
+            pv_mesh = p_v.PolyData(
+                tmesh.vertices,
+                faces_vtk
+            )
+
+            # UV-Koordinaten übernehmen
+            pv_mesh.active_texture_coordinates = np.asarray(uv)
+
+            # ------------------------------------------------------
+            # Texturbild aus dem Trimesh-Material holen
+            # ------------------------------------------------------
+            try:
+                bild_array = np.array(
+                    hole_textur_bild(material)
+                )
+
+                print(
+                    "Textur geladen:",
+                    bild_array.shape,
+                    "Datentyp:",
+                    bild_array.dtype
+                )
+
+                # --------------------------------------------------
+                # Prüfen, ob es sich um PNG/JPG handelt
+                #
+                # Das Bild selbst enthält diese Information nicht
+                # zuverlässig. Deshalb prüfen wir zusätzlich das
+                # Material bzw. den ursprünglichen Pfad.
+                # --------------------------------------------------
+
+                textur_pfad = getattr(
+                    material,
+                    "image_path",
+                    None
+                )
+
+                if textur_pfad is not None:
+                    suffix = Path(str(textur_pfad)).suffix.lower()
+
+                    if suffix in [".jpg", ".jpeg"]:
+                        print("→ JPG/JPEG-Textur erkannt.")
+
+                    elif suffix == ".png":
+                        print("→ PNG-Textur erkannt.")
+
+                    else:
+                        print(
+                            f"→ Unbekanntes Texturformat: {suffix}"
+                        )
+
+                else:
+                    print(
+                        "→ Texturformat konnte nicht über den "
+                        "Dateipfad bestimmt werden."
+                    )
+
+                # PyVista-Textur erzeugen
+                tex = p_v.Texture(bild_array)
+
+                pv_mesh = pv_mesh.compute_normals(
+                    point_normals=True,
+                    auto_orient_normals=True
+                )
+
+                ergebnis.append((pv_mesh, tex))
+
+            except Exception as e:
+                print(
+                    "Fehler beim Laden der Textur:",
+                    repr(e)
+                )
+                continue
+
+            continue
+
+        # ==========================================================
+        # FALL 3: Weder Vertex-Farben noch Textur
+        # ==========================================================
+        print(
+            "Teilmesh ohne Vertex-Farben und ohne UV/Textur "
+            "gefunden. Wird übersprungen."
+        )
+
+    print(
+        f"Erfolgreich geladen, "
+        f"{count_vertices} Vertices gesamt."
+    )
+
     return ergebnis
+
+
  
 
 def zeige_mit_texturen(plotter: p_v.Plotter, teile: list) -> None:
-    for teil, tex in teile:
-        plotter.add_mesh(teil, texture=tex)
+    for teil, farben in teile:
+        plotter.add_mesh(teil, texture=farben)
  
  
 def transformiere_teile(teile: list, transform_matrix) -> list:
-    return [(teil.transform(transform_matrix, inplace=False), tex) for teil, tex in teile]
+    return [(teil.transform(transform_matrix, inplace=False), farben) for teil, farben in teile]
  
  
 def clippe_teile(teile: list, zylinder: p_v.PolyData) -> list:
     ergebnis = []
-    for teil, tex in teile:
+    for teil, farben in teile:
         geschnitten = teil.clip_surface(zylinder, invert = False)
         if geschnitten.n_points > 0:
-            ergebnis.append((geschnitten, tex))
+            ergebnis.append((geschnitten, farben))
     return ergebnis
 
 
@@ -301,17 +457,32 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
         dreiecks_mesh = pv_mesh.triangulate()
         faces = dreiecks_mesh.faces.reshape(-1, 4)[:, 1:]
  
-        if dreiecks_mesh.active_texture_coordinates is None:
-            print(f"Warnung: Teil {i} hat keine Textur-Koordinaten, wird uebersprungen.")
+        if tex is not None:
+            # Texturiertes Teil (JPG/PNG): Farbe pro Vertex aus der
+            # Textur an der jeweiligen UV-Koordinate sampeln.
+            uv = np.asarray(dreiecks_mesh.active_texture_coordinates)
+            bild_array = tex.to_array()
+            hoehe, breite = bild_array.shape[:2]
+
+            # UV -> Pixelkoordinaten. V ist gegenueber dem Bild-Array
+            # invertiert (UV-Ursprung unten links, Array-Ursprung oben links).
+            px = np.clip((uv[:, 0] * (breite - 1)).round().astype(int), 0, breite - 1)
+            py = np.clip(((1 - uv[:, 1]) * (hoehe - 1)).round().astype(int), 0, hoehe - 1)
+            farben = bild_array[py, px]
+
+        elif "RGB" in dreiecks_mesh.point_data:
+            # Teil hat bereits Vertex-Farben, keine Textur.
+            farben = np.asarray(dreiecks_mesh.point_data["RGB"])
+
+        else:
+            print(f"Warnung: Teil {i} hat weder Textur noch Vertex-Farben, wird uebersprungen.")
             continue
- 
-        uv = np.asarray(dreiecks_mesh.active_texture_coordinates)
-        bild = Image.fromarray(tex.to_array())
- 
-        tmesh = trimesh.Trimesh(vertices=dreiecks_mesh.points, faces=faces, process=False)
-        tmesh.visual = trimesh.visual.texture.TextureVisuals(uv=uv, image=bild)
+
+        tmesh = trimesh.Trimesh(
+            vertices=dreiecks_mesh.points, faces=faces,
+            vertex_colors=farben, process=False)
         geometrien[f"teil_{i}"] = tmesh
- 
+
     if not geometrien:
         raise ValueError("Keine gueltigen texturierten Teile zum Speichern gefunden.")
  
@@ -320,6 +491,7 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
  
     print(f"Isolierter Finger ({len(geometrien)} Materialien) gespeichert unter: {save_path}")
     return return_ordner
+
 
 def isolate_finger_parameter_datei_pfad(scan_ordner: Path) -> Path:
         #Pfad zur Parameterdatei, siehe Ordnerstruktur.pdf (Update ich bald)
@@ -365,9 +537,8 @@ def isolate_finger(path: str,
                 unterschreitung = 0.45,
                 zeige_zwischenschritte = True):
     path = Path(path)
-    obj_file = list(path.glob("*.obj"))
 
-    texture_teile = load_teilmeshe_mit_textur(obj_file)
+    texture_teile = load_teilmeshe_mit_textur(path)
     hand_mesh = p_v.merge([teil for teil, tex in texture_teile])
 
     if plotter is not None:

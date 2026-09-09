@@ -253,7 +253,7 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
 
         abstand = np.linalg.norm(punkte[0] - punkte[-1])
 
-        if abstand < 5:
+        if abstand < 1:
             geschlossene_punkte = np.vstack([punkte, punkte[0]])
             status["punkte_eingezeichnet"] = geschlossene_punkte
             linien = np.arange(len(geschlossene_punkte))
