@@ -1,11 +1,17 @@
 import pyvista as p_v
 import numpy as np
 from pathlib import Path
-from sympy import python
+
 import trimesh
-import vtk
 from scipy.spatial import cKDTree
 from PIL import Image
+
+
+def berechne_normalen(pv_mesh: p_v.PolyData) -> p_v.PolyData:
+    return pv_mesh.compute_normals(
+        point_normals=True,
+        auto_orient_normals=True,
+    )
 
 
 def hole_textur_bild(material):
@@ -85,10 +91,7 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
 
             pv_mesh.point_data["RGB"] = vertex_farben
 
-            pv_mesh = pv_mesh.compute_normals(
-                point_normals=True,
-                auto_orient_normals=True
-            )
+            pv_mesh = berechne_normalen(pv_mesh)
 
             # Bei Vertex-Farben bleibt tex None
             ergebnis.append((pv_mesh, None))
@@ -173,10 +176,7 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
                 # PyVista-Textur erzeugen
                 tex = p_v.Texture(bild_array)
 
-                pv_mesh = pv_mesh.compute_normals(
-                    point_normals=True,
-                    auto_orient_normals=True
-                )
+                pv_mesh = berechne_normalen(pv_mesh)
 
                 ergebnis.append((pv_mesh, tex))
 
@@ -216,35 +216,49 @@ def transformiere_teile(teile: list, transform_matrix) -> list:
     return [(teil.transform(transform_matrix, inplace=False), farben) for teil, farben in teile]
  
  
-def clip_mit_strikter_toleranz(mesh: p_v.PolyData, flaeche: p_v.PolyData, invert: bool = False) -> p_v.PolyData:
-    # pyvista.clip_surface() benutzt intern vtkClipPolyData mit einem
-    # Standard-Locator, dessen Verschmelzungstoleranz relativ grosszuegig ist.
-    # Das kann an echten UV-Nahtstellen (absichtlich doppelte Punkte an
-    # exakt gleicher 3D-Position, aber mit unterschiedlicher UV-Koordinate)
-    # neu erzeugte Schnittpunkte faelschlich mit dem falschen Nachbarn
-    # verschmelzen und dadurch die UV-Zuordnung an der Schnittkante zerstoeren.
-    # Deshalb hier ein eigener Locator mit (praktisch) keiner Toleranz.
-    funktion = vtk.vtkImplicitPolyDataDistance()
-    funktion.SetInput(flaeche)
+def waehle_ganze_dreiecke(mesh: p_v.PolyData, flaeche: p_v.PolyData, invert: bool = False) -> p_v.PolyData:
+    # Behaelt ganze Dreiecke, statt sie an der Schnittflaeche zu zerschneiden.
+    #
+    # Warum nicht clip_surface(): Beim echten Schneiden erzeugt VTK neue Punkte
+    # auf der Schnittkante und verschmilzt dabei deckungsgleiche Punkte. An
+    # einer UV-Naht liegen aber absichtlich zwei Punkte auf derselben
+    # 3D-Position - einer je Inselseite, mit unterschiedlicher UV-Koordinate.
+    # Werden die verschmolzen, ueberlebt nur eine der beiden UVs, und die
+    # Dreiecke der anderen Seite zeigen anschliessend auf die falsche Insel.
+    # Ihr Inneres tastet dann quer durch den Atlas ab - das sind die
+    # gezackten Regenbogen-Streifen. Messung am echten Scan: 1555 von 13450
+    # Dreiecken betroffen, groesste UV-Kante 1.04 statt 0.03.
+    #
+    # Ohne neue Punkte gibt es nichts zu verschmelzen, die UVs bleiben heil.
+    # Preis: Der Rand verlaeuft entlang der Dreieckskanten statt exakt auf der
+    # Ellipsoidflaeche - bei einem Vertexabstand von rund 0,5 mm unkritisch.
+    mit_abstand = mesh.compute_implicit_distance(flaeche)
+    abstand = np.asarray(mit_abstand["implicit_distance"])
+    dreiecke = mit_abstand.faces.reshape(-1, 4)[:, 1:]
 
-    locator = vtk.vtkMergePoints()
-    locator.SetTolerance(0.0)
+    if invert:
+        behalten = (abstand[dreiecke] <= 0).all(axis=1)
+    else:
+        behalten = (abstand[dreiecke] >= 0).all(axis=1)
 
-    alg = vtk.vtkClipPolyData()
-    alg.SetInputDataObject(mesh)
-    alg.SetClipFunction(funktion)
-    alg.SetInsideOut(invert)
-    alg.SetValue(0.0)
-    alg.SetLocator(locator)
-    alg.Update()
+    if not behalten.any():
+        return p_v.PolyData()
 
-    return p_v.wrap(alg.GetOutput())
+    ausgewaehlt = mit_abstand.extract_cells(behalten).extract_surface()
+
+    # extract_surface() verliert die Kennzeichnung als aktive Texturkoordinaten
+    if "Texture Coordinates" in ausgewaehlt.point_data:
+        ausgewaehlt.active_texture_coordinates = np.asarray(
+            ausgewaehlt.point_data["Texture Coordinates"]
+        )
+
+    return ausgewaehlt
 
 
 def clippe_teile(teile: list, zylinder: p_v.PolyData) -> list:
     ergebnis = []
     for teil, farben in teile:
-        geschnitten = clip_mit_strikter_toleranz(teil, zylinder, invert=False)
+        geschnitten = waehle_ganze_dreiecke(teil, zylinder, invert=False)
         if geschnitten.n_points > 0:
             ergebnis.append((geschnitten, farben))
     return ergebnis
@@ -664,7 +678,6 @@ def isolate_finger(path: str,
         unterschreitung = unterschreitung)
 
     #Cutten
-    finger_isoliert = hand_ausgerichtet.clip_surface(ellipsoid, invert = False)
     texture_teile_isoliert = clippe_teile(texture_teile, ellipsoid)
 
     #Finale Ausrichtung: Fingerachse -> Z-Achse, Kerbenpunkt -> +X-Achse

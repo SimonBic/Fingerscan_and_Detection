@@ -502,6 +502,7 @@ class HauptFenster(QMainWindow):
         self.isolieren_phase = None
         self.isolieren_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
+
         self.lade_und_zeige(Path(gespeicherter_obj_pfad))
 
     # ---------- Zeichnen ----------
