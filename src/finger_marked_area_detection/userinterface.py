@@ -25,10 +25,9 @@ from pyvistaqt import QtInteractor
 from theme import QSS
 from utils import generator_bis_ende
 from farberkennung import (
-    finde_markierungs_punkte, 
-    entferne_ausreisser_punkte, 
-    baue_geschlossenen_pfad,
-    schliesse_maske)
+    finde_markierungs_punkte,
+    entferne_ausreisser_punkte,
+    baue_geschlossenen_pfad)
 from messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
@@ -46,8 +45,8 @@ from isolate_finger import (
 from draw_area_on_scan import (
     draw_main, 
     save_drawn_area, 
-    extract_faces_of_hand, 
-    get_hand_region,
+    extract_faces_of_hand,
+    schneide_flaeche_aus_loop,
     lese_markierungsfarbe)
 from heatmap3D import (
     baue_3d_genesungsverlauf,
@@ -507,10 +506,18 @@ class HauptFenster(QMainWindow):
 
     # ---------- Zeichnen ----------
 
+    def setze_zeichnungs_status_zurueck(self):
+        # Sonst bleibt nach einem abgebrochenen (nicht geschlossenen) Strich
+        # das Ergebnis des vorherigen Zeichenvorgangs stehen
+        self.zeichnungs_status["flaeche"] = None
+        self.zeichnungs_status["landmarken"] = None
+        self.zeichnungs_status["punkte_eingezeichnet"] = None
+
     def zeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
+        self.setze_zeichnungs_status_zurueck()
         self.navigatecontainer.setVisible(True)
         self.haupt_buttons_container.setVisible(False)
         self.malen_wahl_container.setVisible(True)
@@ -555,6 +562,8 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
 
+        self.setze_zeichnungs_status_zurueck()
+
         markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=100.0)
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende Markierung auf dem Scan gefunden.")
@@ -563,11 +572,14 @@ class HauptFenster(QMainWindow):
         markierte_punkte = entferne_ausreisser_punkte(markierte_punkte)
         pfad = baue_geschlossenen_pfad(markierte_punkte)
 
-        mask = get_hand_region(self.aktuelles_hand_mesh, pfad)
-        mask = schliesse_maske(self.aktuelles_hand_mesh, mask, schritte = 2)
-        flaeche = extract_faces_of_hand(self.aktuelles_hand_mesh, mask)
+        flaeche = schneide_flaeche_aus_loop(self.aktuelles_hand_mesh, pfad)
+        if flaeche is None:
+            self.hinweis_label.setText("Markierung konnte nicht auf dem Scan geschlossen werden.")
+            return
+
         self.zeichnungs_status["flaeche"] = flaeche
         self.zeichnungs_status["landmarken"] = {}
+        self.zeichnungs_status["punkte_eingezeichnet"] = pfad
         self.malen_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(False)
         self.farbe_wahl_container.setVisible(True)
@@ -576,6 +588,7 @@ class HauptFenster(QMainWindow):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
+        self.setze_zeichnungs_status_zurueck()
         self.zeige_basis_mesh_neu()
         self.vermessung_wahl_container.setVisible(False)
         self.malen_wahl_container.setVisible(True)

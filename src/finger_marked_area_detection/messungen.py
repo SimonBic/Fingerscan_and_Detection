@@ -3,11 +3,50 @@ import pyvista as p_v
 import vtk
 from farberkennung import finde_markierungs_punkte 
 
-def berechne_flaeche_und_umfang(flaeche: p_v.PolyData, punkte: np.ndarray) -> tuple[float, float]:
+def umfang_der_schnittkante(flaeche: p_v.PolyData, epsilon: float = 1e-3) -> float:
+    """Umfang der ausgeschnittenen Flaeche - gemessen an ihrem tatsaechlichen
+    Rand, nicht an der gemalten Polylinie. Dadurch passen Flaeche und Umfang
+    zusammen und eine zittrige Maus verlaengert den Umfang nicht mehr.
+
+    Loecher im Scan INNERHALB der Markierung sind ebenfalls offene Raender,
+    duerfen aber nicht mitzaehlen. Sie werden ueber das "Selection"-Feld
+    aussortiert: die Kanten, die beim Schneiden entstanden sind, liegen auf
+    dem Nulldurchgang (Selection ~ 0), Loch-Raender liegen strikt im
+    Negativen."""
+
+    rand = flaeche.extract_feature_edges(
+        boundary_edges=True, feature_edges=False, non_manifold_edges=False, manifold_edges=False
+    )
+
+    if rand.n_cells == 0:
+        return 0.0
+
+    kanten = rand.lines.reshape(-1, 3)
+    laengen = np.linalg.norm(rand.points[kanten[:, 1]] - rand.points[kanten[:, 2]], axis=1)
+
+    if "Selection" not in rand.point_data:
+        return float(laengen.sum())
+
+    abstand_zur_linie = np.abs(np.asarray(rand["Selection"]))
+    schnittkanten = (
+        (abstand_zur_linie[kanten[:, 1]] < epsilon) & (abstand_zur_linie[kanten[:, 2]] < epsilon)
+    )
+
+    if not np.any(schnittkanten):
+        return float(laengen.sum())
+
+    return float(laengen[schnittkanten].sum())
+
+
+def berechne_flaeche_und_umfang(flaeche: p_v.PolyData, punkte: np.ndarray | None = None) -> tuple[float, float]:
     flaecheninhalt = flaeche.area
 
-    geschlossen = np.vstack([punkte, punkte[0]])
-    umfang = np.linalg.norm(np.diff(geschlossen, axis=0), axis=1).sum()
+    umfang = umfang_der_schnittkante(flaeche)
+
+    if umfang == 0.0 and punkte is not None:
+        # Notfall-Fallback fuer Flaechen ohne offenen Rand: Laenge der gemalten Linie
+        geschlossen = np.vstack([punkte, punkte[0]])
+        umfang = float(np.linalg.norm(np.diff(geschlossen, axis=0), axis=1).sum())
 
     return flaecheninhalt, umfang
 

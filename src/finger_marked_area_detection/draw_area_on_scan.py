@@ -184,7 +184,11 @@ def landmarken_als_kugeln(landmarken: dict) -> dict:
     return kugeln
 
 
-def get_hand_region(hand_mesh, circle_points):
+def selection_skalare(hand_mesh, circle_points):
+    # Liefert das Mesh mit dem "Selection"-Array von vtkSelectPolyData:
+    # ein VORZEICHENBEHAFTETER Abstand jedes Punktes zur eingezeichneten
+    # Schleife (negativ = innerhalb). Der Nulldurchgang dieses Feldes ist
+    # exakt die gemalte Linie - genau daran wird spaeter geschnitten.
 
     circle = np.vstack([
         circle_points,
@@ -204,11 +208,38 @@ def get_hand_region(hand_mesh, circle_points):
     selector.GenerateSelectionScalarsOn()
     selector.Update()
 
-    result = p_v.wrap(selector.GetOutput())
-
-    return result["Selection"] < 0
+    return p_v.wrap(selector.GetOutput())
 
 
+def get_hand_region(hand_mesh, circle_points):
+
+    return selection_skalare(hand_mesh, circle_points)["Selection"] < 0
+
+
+def schneide_flaeche_aus_loop(hand_mesh, circle_points):
+    """Schneidet die eingezeichnete Flaeche EXAKT an der gemalten Linie aus.
+
+    Anders als get_hand_region() + extract_faces_of_hand() werden Rand-
+    dreiecke nicht ganz mitgenommen oder ganz verworfen, sondern von
+    vtkClipPolyData am Nulldurchgang des Selection-Feldes zerschnitten.
+    Es zaehlt also nur der Teil eines Dreiecks, der wirklich innerhalb
+    der Markierung liegt.
+
+    Gibt None zurueck, wenn die Schleife nicht sauber auf dem Mesh lag
+    und nichts ausgewaehlt werden konnte."""
+
+    mit_skalaren = selection_skalare(hand_mesh, circle_points)
+
+    # invert=True -> alles UNTER dem Wert 0 behalten, also das Innere
+    flaeche = mit_skalaren.clip_scalar(scalars="Selection", value=0.0, invert=True)
+
+    if flaeche.n_cells == 0:
+        return None
+
+    # wirft die unreferenzierten Punkte des restlichen Meshes weg,
+    # das "Selection"-Array bleibt dabei erhalten (wird fuer den
+    # Umfang in messungen.umfang_der_schnittkante() gebraucht)
+    return flaeche.clean()
 
 
 def extract_faces_of_hand(hand_mesh, mask):
@@ -256,11 +287,13 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
         if abstand < 1:
             geschlossene_punkte = np.vstack([punkte, punkte[0]])
             status["punkte_eingezeichnet"] = geschlossene_punkte
-            linien = np.arange(len(geschlossene_punkte))
-            faces = np.hstack([[len(linien)], linien])
 
-            mask = get_hand_region(hand_mesh, scan.points)
-            flaeche = extract_faces_of_hand(hand_mesh, mask)
+            flaeche = schneide_flaeche_aus_loop(hand_mesh, scan.points)
+
+            if flaeche is None:
+                print("Die Schleife konnte nicht auf den Scan projiziert werden.")
+                return
+
             status["flaeche"] = flaeche
 
             my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
