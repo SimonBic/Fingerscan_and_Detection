@@ -268,7 +268,14 @@ def extract_faces_of_hand(hand_mesh, mask):
         vtk_faces
     )
 
-def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
+def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status, bei_flaeche_fertig=None):
+    """'bei_flaeche_fertig' ist optional. Ohne sie verhaelt sich alles wie
+    bisher: eine Flaeche wird gezeichnet und in 'status' abgelegt.
+
+    Wird eine Funktion uebergeben, uebernimmt der Aufrufer das Anzeigen und
+    Verbuchen der Flaeche, und das Zeichnen wird danach sofort fuer die
+    NAECHSTE Flaeche neu scharf gemacht (Mehrfach-Vermessung)."""
+
     my_p_v_plotter = plotter
 
     hand_mesh = p_v.merge([teil for teil, textur in mesh])
@@ -295,9 +302,20 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
                 return
 
             status["flaeche"] = flaeche
-
-            my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
             print("Kreis geschlossen!")
+
+            if bei_flaeche_fertig is None:
+                my_p_v_plotter.add_mesh(flaeche, color="red", opacity=1)
+                return
+
+            bei_flaeche_fertig(flaeche)
+
+            # Wichtig: enable_path_picking sammelt die gepickten Punkte in
+            # einer Closure-Liste, die ueber die gesamte Lebensdauer EINES
+            # Aufrufs weiterlaeuft. Ohne Neustart wuerde die naechste Flaeche
+            # an diese hier angehaengt. disable + enable legt eine frische
+            # Liste an - dasselbe macht der Landmark-Callback oben schon.
+            path_picking_starten()
             return
 
     
@@ -318,13 +336,13 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status):
     
     
 
-def draw_main(path_to_directory: str, plotter: p_v.Plotter, status):
+def draw_main(path_to_directory: str, plotter: p_v.Plotter, status, bei_flaeche_fertig=None):
     path_to_directory = Path(path_to_directory)
     obj_files = list(path_to_directory.glob("*.obj"))
 
     texture_teile = load_teilmeshe_mit_textur(obj_files)
 
-    draw_circle_on_scan(texture_teile, plotter, path_to_directory, status)
+    draw_circle_on_scan(texture_teile, plotter, path_to_directory, status, bei_flaeche_fertig)
 
     # if drawn_flaeche is not None:
     #     speichern_frage = input("Markierung speichern? (y / n)")

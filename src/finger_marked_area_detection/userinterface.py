@@ -48,6 +48,11 @@ from draw_area_on_scan import (
     extract_faces_of_hand,
     schneide_flaeche_aus_loop,
     lese_markierungsfarbe)
+from vermessung_speichern import (
+    baue_zahl_fuer_messung,
+    speichere_vermessung,
+    schreibe_ergebnis_liste,
+    vermessungs_ordner)
 from heatmap3D import (
     baue_3d_genesungsverlauf,
     speichere_genesungsverlauf,
@@ -73,7 +78,9 @@ class HauptFenster(QMainWindow):
         self.automatisch_modus_aktiv = False
         self.zeichnungs_status = {"flaeche": None, "landmarken": None, "punkte_eingezeichnet": None}
         self.aktuelle_teile = None
-        self.vermessen_modus_aktiv = False
+        # Mehrfach-Vermessung: je Eintrag
+        # {"flaeche", "flaeche_mm2", "umfang_mm", "actor", "zahl_actor"}
+        self.vermessungen = []
         self.ellipsoid_kontext = None
         self.aktueller_ellipsoid_actor = None
         self.isolieren_phase = None
@@ -140,6 +147,14 @@ class HauptFenster(QMainWindow):
 
         self.knopf_layout.addWidget(self.malen_wahl_container)
         self.malen_wahl_container.setVisible(False)
+
+        # --- Vermessen-Malen (mehrere Flaechen nacheinander) ---
+        self.vermessen_malen_container = QWidget()
+        vermessen_malen_layout = QVBoxLayout(self.vermessen_malen_container)
+        self._knopf("Messung(en)\nspeichern", self.vermessungen_speichern_klick, vermessen_malen_layout)
+        self._knopf("Letzte Fläche\nzurücknehmen", self.letzte_flaeche_zuruecknehmen, vermessen_malen_layout)
+        self.knopf_layout.addWidget(self.vermessen_malen_container)
+        self.vermessen_malen_container.setVisible(False)
 
         # --- Farbe-Wahl (Untersuchungs-Farbe beim manuellen Speichern) ---
         self.farbe_wahl_container = QWidget()
@@ -357,10 +372,12 @@ class HauptFenster(QMainWindow):
         self.haupt_buttons_container.setVisible(True)
         self.isolieren_wahl_container.setVisible(False)
         self.malen_wahl_container.setVisible(False)
+        self.vermessen_malen_container.setVisible(False)
         self.farbe_wahl_container.setVisible(False)
         self.vermessung_wahl_container.setVisible(False)
         self.navigatecontainer.setVisible(False)
         self.volumen_container.setVisible(False)
+        self.vermessungen.clear()
         for button in (self.overlay_buttons):
             button.setVisible(False)
         self.lade_und_zeige(Path(self.aktueller_ordner))
@@ -534,14 +551,11 @@ class HauptFenster(QMainWindow):
         self.hinweis_label.setText(f"Fläche: {flaecheninhalt:.1f} mm² | Umfang: {umfang:.1f} mm")
         self.malen_wahl_container.setVisible(False)
 
-        if self.vermessen_modus_aktiv:
-            self.vermessen_modus_aktiv = False
-            self.haupt_buttons_container.setVisible(True)
-            self.navigatecontainer.setVisible(False)
-        else:
-            self.haupt_buttons_container.setVisible(False)
-            self.farbe_wahl_container.setVisible(True)
-            self.navigatecontainer.setVisible(True)
+        # Nur noch der Einzeichnen-Weg landet hier; das Vermessen laeuft
+        # ueber vermessungen_speichern_klick().
+        self.haupt_buttons_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(True)
+        self.navigatecontainer.setVisible(True)
 
     def farbenwahl(self, farbe: str):
         if self.aktueller_ordner is None:
@@ -589,13 +603,92 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
         self.setze_zeichnungs_status_zurueck()
+        self.vermessungen.clear()
         self.zeige_basis_mesh_neu()
         self.vermessung_wahl_container.setVisible(False)
-        self.malen_wahl_container.setVisible(True)
-        self.vermessen_modus_aktiv = True
-        self.button_weiter_malen.setVisible(True)
-        self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
+        self.vermessen_malen_container.setVisible(True)
+        self.hinweis_label.setText(
+            "Fläche einzeichnen und Schleife schließen. Beliebig viele nacheinander.")
+        draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status,
+                  bei_flaeche_fertig=self.flaeche_fertig_gemalt)
         self.navigatecontainer.setVisible(True)
+
+    # ---------- Mehrfach-Vermessung ----------
+
+    def flaeche_fertig_gemalt(self, flaeche):
+        # Wird aus dem Picking-Callback aufgerufen, sobald eine Schleife
+        # geschlossen wurde. Danach ist sofort die naechste Flaeche dran.
+        flaecheninhalt, umfang = berechne_flaeche_und_umfang(flaeche)
+        nummer = len(self.vermessungen) + 1
+
+        actor = self.plotter.add_mesh(
+            flaeche, color="red", opacity=1, name=f"vermessung_{nummer}")
+
+        zahl = baue_zahl_fuer_messung(
+            flaeche, self.aktuelles_hand_mesh, nummer, flaecheninhalt)
+        zahl_actor = self.plotter.add_mesh(
+            zahl, color="white", name=f"vermessung_zahl_{nummer}")
+
+        self.vermessungen.append({
+            "flaeche": flaeche,
+            "flaeche_mm2": flaecheninhalt,
+            "umfang_mm": umfang,
+            "actor": actor,
+            "zahl_actor": zahl_actor,
+        })
+        self.zeige_messergebnisse()
+
+    def zeige_messergebnisse(self):
+        if not self.vermessungen:
+            self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
+            return
+
+        zeilen = [f"{len(self.vermessungen)} Fläche(n) gemessen"]
+        for nummer, messung in enumerate(self.vermessungen, start=1):
+            zeilen.append(
+                f"{nummer}: {messung['flaeche_mm2']:.1f} mm²  |  {messung['umfang_mm']:.1f} mm")
+        self.hinweis_label.setText("\n".join(zeilen))
+
+    def letzte_flaeche_zuruecknehmen(self):
+        if not self.vermessungen:
+            self.hinweis_label.setText("Es gibt nichts zurückzunehmen.")
+            return
+
+        messung = self.vermessungen.pop()
+        for actor in (messung["actor"], messung["zahl_actor"]):
+            if actor is not None:
+                self.plotter.remove_actor(actor, reset_camera=False)
+        self.plotter.render()
+        self.zeige_messergebnisse()
+
+    def vermessungen_speichern_klick(self):
+        if not self.vermessungen:
+            self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
+            return
+
+        self.plotter.disable_picking()
+        scan_ordner = Path(self.aktueller_ordner)
+
+        try:
+            obj_pfad = speichere_vermessung(
+                self.aktuelle_teile, self.aktuelles_hand_mesh, self.vermessungen, scan_ordner)
+        except Exception as e:
+            self.hinweis_label.setText(f"Fehler: {e}")
+            return
+
+        ziel_ordner, ziel_name = vermessungs_ordner(scan_ordner)
+        liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner, ziel_name)
+
+        if liste_pfad is None:
+            self.hinweis_label.setText(
+                f"Gespeichert unter {obj_pfad.parent}\n"
+                "Excel-Liste übersprungen - openpyxl ist nicht installiert.")
+        else:
+            self.hinweis_label.setText(
+                f"{len(self.vermessungen)} Messung(en) gespeichert unter {obj_pfad.parent}")
+
+        self.vermessen_malen_container.setVisible(False)
+        self.lade_main_menu()
 
     # ---------- Vermessen ----------
 
