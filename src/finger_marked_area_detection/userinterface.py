@@ -13,13 +13,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton, 
     QSlider, 
-    QTreeView, 
-    QFileSystemModel, 
-    QLineEdit)
+    QTreeView,
+    QFileSystemModel,
+    QLineEdit,
+    QScrollArea,
+    QFrame,
+    QSizePolicy)
 from PySide6.QtCore import (
-    QDir, 
-    Qt, 
-    QEvent)
+    QDir,
+    Qt,
+    QEvent,
+    QSize)
 from pyvistaqt import QtInteractor
 
 from theme import QSS
@@ -64,6 +68,59 @@ from heatmap3D import (
     baue_farbgruppen_aus_gewinner,
     farb_prioritaet)
 from heatmap2D import heatmap_main
+
+# Hoehe des Hinweis-Labels ueber dem 3D-Viewer: mindestens eine Zeile,
+# hoechstens HINWEIS_MAX_ZEILEN - darueber hinaus wird gescrollt.
+HINWEIS_MAX_ZEILEN = 3
+HINWEIS_RAND = 8
+
+
+class HinweisBereich(QScrollArea):
+    """Scroll-Bereich fuers Hinweis-Label, der genau so hoch wird wie sein
+    Inhalt - mindestens eine, hoechstens HINWEIS_MAX_ZEILEN Zeilen.
+
+    Noetig, weil QScrollArea seinen sizeHint NICHT vom eingesetzten Widget
+    ableitet: ohne diese Ueberschreibung waere der Bereich immer so hoch
+    wie erlaubt, also auch bei einer einzigen Zeile drei Zeilen hoch."""
+
+    def _gewuenschte_hoehe(self) -> int:
+        hinweis = self.widget()
+        if hinweis is None:
+            return super().sizeHint().height()
+
+        zeilen_hoehe = hinweis.fontMetrics().lineSpacing()
+        noetige_hoehe = hinweis.sizeHint().height()
+        hoehe = min(max(noetige_hoehe, zeilen_hoehe), zeilen_hoehe * HINWEIS_MAX_ZEILEN)
+
+        return hoehe + HINWEIS_RAND
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), self._gewuenschte_hoehe())
+
+    def minimumSizeHint(self) -> QSize:
+        # Muss ebenfalls ueberschrieben werden: QAbstractScrollArea meldet
+        # sonst eine Mindesthoehe aus Rahmen und Scrollbar-Breite, die
+        # groesser als eine Textzeile ist und den sizeHint aushebelt.
+        return QSize(super().minimumSizeHint().width(), self._gewuenschte_hoehe())
+
+
+class HinweisLabel(QLabel):
+    """QLabel, das seinen HinweisBereich nach jeder Textaenderung neu
+    vermessen laesst. Ohne das bliebe der Bereich auf der Hoehe stehen,
+    die er beim ersten Anzeigen hatte - QLabel.setText() loest von sich
+    aus keine Neuberechnung im umgebenden Layout aus."""
+
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        self.updateGeometry()
+
+        bereich = self.parentWidget()
+        while bereich is not None and not isinstance(bereich, HinweisBereich):
+            bereich = bereich.parentWidget()
+
+        if bereich is not None:
+            bereich.updateGeometry()
+            bereich.verticalScrollBar().setValue(0)   # neue Meldung von oben zeigen
 
 
 class HauptFenster(QMainWindow):
@@ -226,9 +283,31 @@ class HauptFenster(QMainWindow):
         # --- Viewer ---
         self.viewer_spalte = QWidget()
         viewer_layout = QVBoxLayout(self.viewer_spalte)
-        self.hinweis_label = QLabel("Scan-Ordner per Drag-and-Drop hierher ziehen")
+        self.hinweis_label = HinweisLabel("Scan-Ordner per Drag-and-Drop hierher ziehen")
         self.hinweis_label.setAlignment(Qt.AlignCenter)
-        viewer_layout.addWidget(self.hinweis_label)
+        # ensurePolished() zieht die Schriftgroesse aus dem Stylesheet in die
+        # Font-Metriken. Ohne das rechnet lineSpacing() noch mit der
+        # Standardschrift und die Hoehen unten waeren zu klein.
+        self.hinweis_label.ensurePolished()
+
+        # Bei mehreren Messungen wird das Label mehrzeilig. Es soll mindestens
+        # eine und hoechstens drei Zeilen hoch sein - alles darueber wird
+        # scrollbar, damit der 3D-Viewer nicht immer weiter schrumpft.
+        self.hinweis_bereich = HinweisBereich()
+        self.hinweis_bereich.setWidget(self.hinweis_label)
+        self.hinweis_bereich.setWidgetResizable(True)
+        self.hinweis_bereich.setFrameShape(QFrame.NoFrame)
+        self.hinweis_bereich.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        # Vertikal Fixed, damit das Layout genau den sizeHint von
+        # HinweisBereich nimmt statt den Bereich auf die Maximalhoehe
+        # aufzublasen.
+        self.hinweis_bereich.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        zeilen_hoehe = self.hinweis_label.fontMetrics().lineSpacing()
+        self.hinweis_bereich.setMinimumHeight(zeilen_hoehe + HINWEIS_RAND)
+        self.hinweis_bereich.setMaximumHeight(zeilen_hoehe * HINWEIS_MAX_ZEILEN + HINWEIS_RAND)
+        viewer_layout.addWidget(self.hinweis_bereich)
 
         self.plotter = QtInteractor(self.viewer_spalte)
         self.plotter.set_background("F5F7FA")
@@ -677,7 +756,9 @@ class HauptFenster(QMainWindow):
             return
 
         ziel_ordner, ziel_name = vermessungs_ordner(scan_ordner)
-        liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner, ziel_name)
+        # Die Ergebnisliste liegt eine Ebene ueber dem Scan-Ordner, also
+        # direkt in 'vermessene_scans'.
+        liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner.parent, ziel_name)
 
         if liste_pfad is None:
             self.hinweis_label.setText(
@@ -685,7 +766,9 @@ class HauptFenster(QMainWindow):
                 "Excel-Liste übersprungen - openpyxl ist nicht installiert.")
         else:
             self.hinweis_label.setText(
-                f"{len(self.vermessungen)} Messung(en) gespeichert unter {obj_pfad.parent}")
+                f"{len(self.vermessungen)} Messung(en) gespeichert\n"
+                f"Scan: {obj_pfad.parent}\n"
+                f"Liste: {liste_pfad}")
 
         self.vermessen_malen_container.setVisible(False)
         self.lade_main_menu()

@@ -28,9 +28,23 @@ ZAHL_FARBE = (255, 255, 255)       # weiss
 # Die Flaechen liegen exakt auf der Hand-Oberflaeche und wuerden mit ihr
 # um die Sichtbarkeit streiten (Z-Fighting). Deshalb werden sie entlang
 # ihrer Normalen leicht abgehoben - gleiches Mittel wie in heatmap3D.py.
-FLAECHEN_VERSATZ = 0.3             # mm
-ZAHL_VERSATZ = 0.6                 # mm, liegt nochmal ueber der Flaeche
+# Groesser = die Flaeche steht deutlicher ueber dem Scan und ist auch bei
+# starker Kruemmung und flachem Blickwinkel noch klar zu sehen. Nicht
+# beliebig erhoehen: in konkaven Stellen (Fingerzwischenraum) faltet sich
+# die Flaeche in sich selbst, sobald der Versatz an den dortigen
+# Kruemmungsradius heranreicht.
+FLAECHEN_VERSATZ = 1.0             # mm
+
+# Die Zahl muss immer UEBER der roten Flaeche liegen, darum an deren
+# Versatz gekoppelt - sonst versinkt sie, sobald oben geschraubt wird.
+ZAHL_ABSTAND_UEBER_FLAECHE = 0.3   # mm
+ZAHL_VERSATZ = FLAECHEN_VERSATZ + ZAHL_ABSTAND_UEBER_FLAECHE
 ZIFFER_TIEFE = 0.4                 # mm Extrusion
+
+# Fuer die Pruefung, ob die starre Ziffer in einer Hautfalte versinkt
+ZIFFER_UMKREIS_FAKTOR = 0.8        # halbe Diagonale, bezogen auf die Hoehe
+ZIFFER_LUFT = 0.1                  # mm Sicherheitsabstand
+ZIFFER_MIN_HOEHE = 1.0             # mm, kleiner wird die Ziffer nie
 
 
 def _flaches_material(tmesh: trimesh.Trimesh, farbe_rgb: tuple) -> None:
@@ -48,11 +62,43 @@ def _als_trimesh(mesh: p_v.PolyData) -> trimesh.Trimesh:
     return trimesh.Trimesh(vertices=dreiecke.points, faces=faces, process=False)
 
 
-def hebe_flaeche_ab(flaeche: p_v.PolyData, versatz: float = FLAECHEN_VERSATZ) -> p_v.PolyData:
-    """Schiebt die Flaeche entlang ihrer Punktnormalen nach aussen, damit
-    sie im gespeicherten Scan sichtbar ueber der Hand liegt."""
-    abgehoben = flaeche.compute_normals(point_normals=True, auto_orient_normals=True)
-    abgehoben.points = abgehoben.points + abgehoben.point_normals * versatz
+def aussen_normalen(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData) -> np.ndarray:
+    """Punktnormalen der Flaeche, garantiert nach AUSSEN zeigend.
+
+    compute_normals(auto_orient_normals=True) reicht dafuer nicht: das
+    Verfahren braucht eine geschlossene Oberflaeche, um 'aussen' ueberhaupt
+    bestimmen zu koennen. Ein ausgeschnittenes Flaechenstueck ist offen,
+    also zeigen die Normalen je nach Wicklung des Scans mal so und mal so -
+    und die Flaeche verschwindet beim Abheben IM Finger.
+
+    Deshalb wird die Richtung hier explizit geprueft: die Flaeche ist ein
+    zusammenhaengendes Stueck mit einheitlicher Wicklung, es genuegt also
+    ein Vorzeichen fuer alle Punkte. Entschieden wird es daran, ob die
+    mittlere Normale vom Mesh-Schwerpunkt weg zeigt (gleiches Mittel wie
+    in messungen.schliesse_offenes_ende)."""
+
+    mit_normalen = flaeche.compute_normals(point_normals=True, auto_orient_normals=True)
+    normalen = np.asarray(mit_normalen.point_normals, dtype=float)
+
+    nach_aussen = np.asarray(flaeche.points) - np.asarray(hand_mesh.points).mean(axis=0)
+    if np.sum(normalen * nach_aussen) < 0:
+        normalen = -normalen
+
+    return normalen
+
+
+def hebe_flaeche_ab(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData,
+                    versatz: float = FLAECHEN_VERSATZ) -> p_v.PolyData:
+    """Schiebt die Flaeche entlang ihrer Normalen nach aussen, damit sie im
+    gespeicherten Scan sichtbar ueber der Hand liegt.
+
+    Arbeitet auf einer echten Kopie: compute_normals() gibt ein Mesh
+    zurueck, das sich das Punkte-Array mit der Eingabe TEILT. Ohne die
+    Kopie wuerde die Flaeche der UI mitverschoben - bei jedem Speichern
+    erneut, samt wachsendem Flaecheninhalt."""
+
+    abgehoben = flaeche.copy(deep=True)
+    abgehoben.points = np.asarray(flaeche.points) + aussen_normalen(flaeche, hand_mesh) * versatz
     return abgehoben
 
 
@@ -66,14 +112,7 @@ def platzierung_der_zahl(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData) -> tupl
     index = flaeche.find_closest_point(schwerpunkt)
     position = np.asarray(flaeche.points[index])
 
-    mit_normalen = flaeche.compute_normals(point_normals=True, auto_orient_normals=True)
-    normale = np.asarray(mit_normalen.point_normals[index], dtype=float)
-
-    # auto_orient_normals kann bei einem offenen Flaechenstueck nach innen
-    # zeigen - gegen die Richtung "weg vom Mesh-Schwerpunkt" pruefen.
-    nach_aussen = position - np.asarray(hand_mesh.points).mean(axis=0)
-    if np.dot(normale, nach_aussen) < 0:
-        normale = -normale
+    normale = aussen_normalen(flaeche, hand_mesh)[index]
 
     # Isolierte Finger liegen entlang Z, das ist die natuerliche Leserichtung.
     hoch = np.array([0.0, 0.0, 1.0])
@@ -87,6 +126,51 @@ def ziffer_hoehe(flaeche_mm2: float) -> float:
     # Die Zahl soll kleine Tattoos nicht zudecken und bei grossen nicht
     # verschwinden - daher an die Kantenlaenge der Flaeche gekoppelt.
     return float(np.clip(np.sqrt(max(flaeche_mm2, 0.0)) / 2.5, 1.5, 6.0))
+
+
+def passende_ziffer_hoehe(hand_mesh: p_v.PolyData, position: np.ndarray,
+                          normale: np.ndarray, wunsch_hoehe: float,
+                          versatz: float = ZAHL_VERSATZ) -> float:
+    """Verkleinert die Ziffer, wenn sie sonst in der Oberflaeche versinken
+    wuerde.
+
+    Die Ziffer ist eine STARRE flache Platte. In einer engen konkaven
+    Stelle (Hautfalte) steigt die Oberflaeche rundherum an, und die Ecken
+    der Platte verschwinden darin - mehr Versatz hilft dort nicht, weil
+    die Platte dann nur weiter gegen die ansteigenden Waende drueckt.
+    Was hilft, ist eine kleinere Ziffer.
+
+    Geprueft wird direkt: steigt die Hand im Umkreis der Ziffer ueber
+    deren Ebene? Gemessen entlang der (verlaesslich nach aussen zeigenden)
+    Normalen, daher unabhaengig von der Wicklung des Scans."""
+
+    n = np.asarray(normale, dtype=float)
+    n = n / np.linalg.norm(n)
+
+    relativ = np.asarray(hand_mesh.points) - np.asarray(position, dtype=float)
+    anstieg = relativ @ n                                   # Hoehe ueber der Ebene
+    in_ebene = np.linalg.norm(relativ - np.outer(anstieg, n), axis=1)
+    abstand = np.linalg.norm(relativ, axis=1)
+
+    hoehe = wunsch_hoehe
+    for _ in range(6):
+        # halbe Diagonale der Ziffer: Breite liegt bei rund 1.2 x Hoehe
+        umkreis = hoehe * ZIFFER_UMKREIS_FAKTOR
+
+        # Nur die UMLIEGENDE Oberflaeche zaehlt. Die Begrenzung auf den
+        # raeumlichen Abstand ist wichtig: sonst schlagen auch Punkte an,
+        # die senkrecht weit weg sind (die gegenueberliegende Seite des
+        # Fingers), in der Projektion aber nah liegen.
+        nachbarn = (in_ebene <= umkreis) & (abstand <= umkreis + versatz)
+
+        if not np.any(nachbarn) or anstieg[nachbarn].max() < versatz - ZIFFER_LUFT:
+            break
+
+        hoehe *= 0.75
+
+    # Unter die Mindesthoehe nicht schrumpfen - eine Ziffer, die keiner mehr
+    # lesen kann, nuetzt nichts, auch wenn sie dann frei steht.
+    return max(hoehe, ZIFFER_MIN_HOEHE)
 
 
 def zahl_auf_oberflaeche(
@@ -126,8 +210,11 @@ def baue_zahl_fuer_messung(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData,
                            nummer: int, flaeche_mm2: float) -> p_v.PolyData:
     """Bequemlichkeits-Wrapper: Platzierung bestimmen und Ziffer bauen."""
     position, normale, hoch = platzierung_der_zahl(flaeche, hand_mesh)
-    return zahl_auf_oberflaeche(
-        str(nummer), position, normale, hoch, ziffer_hoehe(flaeche_mm2))
+
+    hoehe = passende_ziffer_hoehe(
+        hand_mesh, position, normale, ziffer_hoehe(flaeche_mm2))
+
+    return zahl_auf_oberflaeche(str(nummer), position, normale, hoch, hoehe)
 
 
 def vermessungs_ordner(scan_ordner: Path) -> tuple:
@@ -162,7 +249,7 @@ def speichere_vermessung(aktuelle_teile: list, hand_mesh: p_v.PolyData,
     for nummer, messung in enumerate(messungen, start=1):
         flaeche = messung["flaeche"]
 
-        rote_flaeche = _als_trimesh(hebe_flaeche_ab(flaeche))
+        rote_flaeche = _als_trimesh(hebe_flaeche_ab(flaeche, hand_mesh))
         rote_flaeche.remove_unreferenced_vertices()
         _flaches_material(rote_flaeche, MESSUNG_FARBE)
         geometrien[f"vermessung_{nummer}"] = rote_flaeche
@@ -203,7 +290,11 @@ def speichere_vermessung(aktuelle_teile: list, hand_mesh: p_v.PolyData,
 
 
 def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str):
-    """Schreibt die Messergebnisse als Excel-Liste neben den Scan.
+    """Schreibt die Messergebnisse als Excel-Liste in 'ziel_ordner'.
+
+    Aufgerufen wird das mit 'vermessene_scans' selbst, nicht mit dem
+    Scan-Unterordner - die Listen aller Scans eines Patienten liegen also
+    nebeneinander, eine Ebene ueber den Scans.
 
     Gibt den Pfad zurueck - oder None, wenn openpyxl fehlt. Dann ist der
     OBJ-Export trotzdem schon geschrieben und die App laeuft weiter."""
