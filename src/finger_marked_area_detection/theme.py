@@ -21,6 +21,23 @@ QPushButton {
     font-weight: 500;
 }
 
+QToolButton#patient_knopf {
+    border: none;
+    background: #F0F0F0;
+    border-radius: 8px;
+    font-size: 10px;
+}
+QToolButton#patient_knopf:hover { background: #E0E8F0; }
+QPushButton#untersuchung_knopf {
+    text-align: center;
+    padding: 4px 2px;
+    border: none;
+    border-radius: 6px;
+    background: #F6F6F4;
+    font-size: 10px;
+}
+QPushButton#untersuchung_knopf:hover { background: #EAF1F7; }
+
 QPushButton#overlay_button {
     border-radius: 0px;
 }
@@ -45,6 +62,24 @@ QPushButton#zahnrad_knopf {
 }
 QPushButton#zahnrad_knopf:hover {
     color: #333333;
+}
+
+
+QTreeWidget {
+    border: none;
+    background: transparent;
+    outline: 0;
+}
+QTreeWidget::item {
+    height: 28px;
+    padding-left: 4px;
+}
+QTreeWidget::item:hover {
+    background: #EAF1F7;
+}
+QTreeWidget::item:selected {
+    background: #D6E4F0;
+    color: black;
 }
 
 QPushButton:disabled {

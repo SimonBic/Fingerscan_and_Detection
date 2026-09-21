@@ -1,33 +1,39 @@
 
 import sys
+from matplotlib import container
 import pyvista as p_v
 import numpy as np
 from pathlib import Path
+from collections import defaultdict
 
 from PySide6.QtWidgets import (
     QMainWindow, 
     QApplication, 
-    QLabel, 
+    QLabel,
     QVBoxLayout, 
     QWidget, 
     QHBoxLayout,
+    QGridLayout,
     QPushButton, 
     QSlider, 
-    QTreeView,
-    QFileSystemModel,
     QLineEdit,
     QScrollArea,
     QFrame,
     QSizePolicy,
     QDialog,
     QFileDialog,
-    QDialogButtonBox)
+    QDialogButtonBox,
+    QToolButton,
+    )
 from PySide6.QtCore import (
-    QDir,
     Qt,
     QEvent,
     QSize,
-    QSettings)
+    QSettings,
+    )
+from PySide6.QtGui import (
+    QIcon
+)
 from pyvistaqt import QtInteractor
 
 from theme import QSS
@@ -75,9 +81,14 @@ from heatmap2D import heatmap_main
 
 # Hoehe des Hinweis-Labels ueber dem 3D-Viewer: mindestens eine Zeile,
 # hoechstens HINWEIS_MAX_ZEILEN - darueber hinaus wird gescrollt.
+KNOPF_BREITE = 192
+NAV_KNOPF_BREITE = 80   # Patient-Avatar und Untersuchungs-Knopf
+PIKTO_GROESSE = 34      # Typ-Piktogramme links neben der Untersuchung
+NAV_ABSTAND = 4         # zwischen Piktogramm und Knopf, und Rand der Nav-Spalte
+KNOPF_HOEHE = 108
 HINWEIS_MAX_ZEILEN = 3
 HINWEIS_RAND = 8
-
+ICON_ORDNER = Path(__file__).parent / "icons"
 
 class HinweisBereich(QScrollArea):
     """Scroll-Bereich fuers Hinweis-Label, der genau so hoch wird wie sein
@@ -265,38 +276,40 @@ class HauptFenster(QMainWindow):
 
         
 
-        # --- Ordner-Browser (unten, 1/3 Hoehe) ---
-        aussen_spalte = QWidget()
-        aussen_layout = QVBoxLayout(aussen_spalte)
-        aussen_layout.addWidget(self.knopf_spalte, stretch=2)
+        # --- Knopf-Spalte ganz links ins Haupt-Layout ---
+        haupt_layout.addWidget(self.knopf_spalte)
 
-        self.ordner_browser_widget = QWidget()
-        browser_layout = QVBoxLayout(self.ordner_browser_widget)
-        self.pfad_eingabe = QLineEdit()
-        self.pfad_eingabe.setPlaceholderText("Pfad zum Scan-Ordner bitte hier eingeben")
-        self.pfad_eingabe.returnPressed.connect(self.pfad_geladen)
-        browser_layout.addWidget(self.pfad_eingabe)
+        # --- Navigations-Spalte ganz rechts, feste Breite ---
+        self.nav_spalte = QScrollArea()
+        self.nav_spalte.setFrameShape(QFrame.NoFrame)
+        self.nav_spalte.setWidgetResizable(True)
+        self.nav_spalte.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Genau so breit wie der Inhalt: Rand | Piktogramm | Abstand | Avatar | Rand,
+        # plus Platz fuer die senkrechte Scrollleiste. Die wird fest reserviert,
+        # sonst schiebt sie sich bei vielen Patienten ueber die Avatare.
+        self.nav_spalte.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.nav_spalte.verticalScrollBar().ensurePolished()
+        inhalt_breite = NAV_ABSTAND + PIKTO_GROESSE + NAV_ABSTAND + NAV_KNOPF_BREITE + NAV_ABSTAND
+        self.nav_spalte.setFixedWidth(inhalt_breite + self.nav_spalte.verticalScrollBar().sizeHint().width())
 
-        self.ordner_baum = QTreeView()
-        self.dateisystem_modell = QFileSystemModel()
-        self.dateisystem_modell.setFilter(QDir.Dirs | QDir.NoDotAndDotDot)
-        self.ordner_baum.setModel(self.dateisystem_modell)
-        for spalte in range(1, 4):
-            self.ordner_baum.hideColumn(spalte)
-        self.ordner_baum.clicked.connect(self.baum_klick)
-        browser_layout.addWidget(self.ordner_baum)
-        aussen_layout.addWidget(self.ordner_browser_widget, stretch=1)
+        self.nav_inhalt = QWidget()
+        self.nav_layout = QVBoxLayout(self.nav_inhalt)
+        self.nav_layout.setAlignment(Qt.AlignTop)
+        self.nav_layout.setContentsMargins(NAV_ABSTAND, NAV_ABSTAND, NAV_ABSTAND, NAV_ABSTAND)
+        self.nav_layout.setSpacing(6)
+        self.nav_spalte.setWidget(self.nav_inhalt)
 
-        haupt_layout.addWidget(aussen_spalte, stretch=1)
-
-        # --- Einstellungsknopf ---
-        self.button_einstellungen = QPushButton("⚙")
-        self.button_einstellungen.setObjectName("zahnrad_knopf") #fürs sylesheet
-        self.button_einstellungen.setFixedSize(40, 40)
+        # Einstellungsknopf oben in die Spalte
+        self.button_einstellungen = QToolButton()
+        self.button_einstellungen.setObjectName("zahnrad_knopf")
+        self.button_einstellungen.setText("⚙")
         self.button_einstellungen.setToolTip("Einstellungen")
         self.button_einstellungen.clicked.connect(self.einstellungen_oeffnen)
+        self.nav_layout.addWidget(self.button_einstellungen, alignment=Qt.AlignRight)
 
-        aussen_layout.addWidget(self.button_einstellungen, alignment=Qt.AlignLeft)
+        # Zustand fürs Akkordeon
+        self._offener_patient = None
+        self._offene_untersuchung = None
 
         # --- Viewer ---
         self.viewer_spalte = QWidget()
@@ -332,6 +345,9 @@ class HauptFenster(QMainWindow):
         viewer_layout.addWidget(self.plotter.interactor)
         haupt_layout.addWidget(self.viewer_spalte, stretch=4)
 
+        # ganz rechts, nach dem Viewer
+        haupt_layout.addWidget(self.nav_spalte)
+
         # --- Buttons im Viewer, oben rechts ---
         self.overlay_buttons = []
 
@@ -360,9 +376,10 @@ class HauptFenster(QMainWindow):
         self._positioniere_overlay_buttons()
 
         self._root_ordner_anwenden()
+        self.baum_neu_aufbauen()
     # ---------- kleine Bau-Helfer ----------
 
-    def _knopf(self, text: str, funktion, ziel_layout, x = 192, y = 108) -> QPushButton:
+    def _knopf(self, text: str, funktion, ziel_layout, x = KNOPF_BREITE, y = KNOPF_HOEHE) -> QPushButton:
         button = QPushButton(text)
         button.setFixedSize(x, y)
         button.clicked.connect(funktion)
@@ -401,20 +418,6 @@ class HauptFenster(QMainWindow):
         pfad = Path(urls[0].toLocalFile())
         ordner = pfad.parent if pfad.is_file() else pfad
         self.lade_und_zeige(ordner)
-
-    def pfad_geladen(self):
-        pfad = self.pfad_eingabe.text().strip()
-        if not Path(pfad).is_dir():
-            self.hinweis_label.setText("Pfad existiert nicht oder ist kein Ordner.")
-            return
-        self.dateisystem_modell.setRootPath(pfad)
-        self.ordner_baum.setRootIndex(self.dateisystem_modell.index(pfad))
-
-    def baum_klick(self, index):
-        pfad = Path(self.dateisystem_modell.filePath(index))
-        if list(pfad.glob("*.obj")):
-            self.aktueller_ordner = str(pfad)
-            self.lade_und_zeige(pfad)
 
     def _rendere_teile(self, teile: list) -> None:
         for pv_mesh, tex in teile:
@@ -528,11 +531,195 @@ class HauptFenster(QMainWindow):
     def _root_ordner_anwenden(self):
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
             return
+        self.baum_neu_aufbauen()
+
+    TYP_ORDNER = ["originale_scans", "isolierte_scans", "markierte_scans"]
+
+    def _scan_analysieren(self, scan_name):
         
-        self.dateisystem_modell.setRootPath(self.root_ordner)
-        self.ordner_baum.setRootIndex(self.dateisystem_modell.index(self.root_ordner))
-        if hasattr(self, "pfad_eingabe"):
-            self.pfad_eingabe.setText(self.root_ordner)
+        if scan_name.endswith("_isoliert_marked"):
+            return scan_name[:-len("_isoliert_marked")], "markiert (vom isolierten)"
+        if scan_name.endswith("_marked"):
+            return scan_name[:-len("_marked")], "markiert (vom Original)"
+        if scan_name.endswith("_isoliert"):
+            return scan_name[:-len("_isoliert")], "isoliert"
+        return scan_name, "original"
+
+    def baum_neu_aufbauen(self):
+        """Baut die Navigations-Spalte: Patienten als Avatar-Knoepfe,
+        darunter aufklappbar die Untersuchungen, darunter die Typ-Piktogramme."""
+        # Alte Patienten-Widgets entfernen (Einstellungsknopf behalten)
+        while self.nav_layout.count() > 1:
+            item = self.nav_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        self._offener_patient = None
+        self._offene_untersuchung = None
+
+        if not self.root_ordner or not Path(self.root_ordner).is_dir():
+            return
+
+        root = Path(self.root_ordner)
+        for patient_ordner in sorted(p for p in root.iterdir() if p.is_dir()):
+            struktur = self._untersuchungen_sammeln(patient_ordner)
+            if not struktur:
+                continue
+            self._patient_block_bauen(patient_ordner, struktur)
+
+
+    def _untersuchungen_sammeln(self, patient_ordner):
+        """{untersuchung_basis: {typ_label: pfad}}, lexikografisch nach Basis."""
+        untersuchungen = defaultdict(dict)
+        for typ in self.TYP_ORDNER:
+            typ_pfad = patient_ordner / typ
+            if not typ_pfad.is_dir():
+                continue
+            for scan in sorted(s for s in typ_pfad.iterdir() if s.is_dir()):
+                basis, label = self._scan_analysieren(scan.name)
+                untersuchungen[basis][label] = str(scan)
+        return dict(sorted(untersuchungen.items()))
+
+
+    def _patient_block_bauen(self, patient_ordner, struktur):
+        patient_name = patient_ordner.name
+        # Avatar-Knopf
+        patient_knopf = QToolButton()
+        patient_knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        patient_knopf.setFixedSize(NAV_KNOPF_BREITE, NAV_KNOPF_BREITE)
+        patient_knopf.setIconSize(QSize(44, 44))
+        patient_knopf.setIcon(QIcon(str(ICON_ORDNER / "person.svg")))
+        patient_knopf.setText(patient_name)
+        patient_knopf.setObjectName("patient_knopf")
+
+        # Zeile: [Genesungsverlauf-Knopf] [Avatar] - gleiche Aufteilung wie
+        # die Untersuchungs-Zeilen darunter, damit der Avatar buendig ueber
+        # den Untersuchungs-Knoepfen sitzt.
+        patient_zeile = QWidget()
+        pz_layout = QHBoxLayout(patient_zeile)
+        pz_layout.setContentsMargins(0, 0, 0, 0)
+        pz_layout.setSpacing(NAV_ABSTAND)
+
+        verlauf_knopf = self._genesungsverlauf_knopf_bauen(patient_ordner)
+        if verlauf_knopf is not None:
+            pz_layout.addWidget(verlauf_knopf, alignment=Qt.AlignTop)
+        else:
+            pz_layout.addSpacing(PIKTO_GROESSE)
+        pz_layout.addWidget(patient_knopf)
+        self.nav_layout.addWidget(patient_zeile, alignment=Qt.AlignLeft)
+
+        # Container fuer die Untersuchungen (anfangs versteckt).
+        # Raster: Spalte 0 = Piktogramme, Spalte 1 = Untersuchungs-Knopf.
+        untersuchungen_container = QWidget()
+        uc_layout = QGridLayout(untersuchungen_container)
+        uc_layout.setContentsMargins(0, 0, 0, 0)
+        uc_layout.setHorizontalSpacing(NAV_ABSTAND)
+        uc_layout.setVerticalSpacing(3)
+        # Spalte 0 behaelt ihre Breite auch wenn die Piktogramme versteckt
+        # sind - sonst springt der Untersuchungs-Knopf beim Aufklappen zur Seite.
+        uc_layout.setColumnMinimumWidth(0, PIKTO_GROESSE)
+        untersuchungen_container.setVisible(False)
+        self.nav_layout.addWidget(untersuchungen_container, alignment=Qt.AlignLeft)
+
+        # Untersuchungen generisch nummeriert
+        for nummer, (basis, typen) in enumerate(struktur.items(), start=1):
+            self._untersuchung_block_bauen(uc_layout, nummer - 1, nummer, typen)
+
+        # Genesungsverlauf-Knopf nur bei aufgeklapptem Patienten zeigen
+        aufklapp_widgets = [untersuchungen_container]
+        if verlauf_knopf is not None:
+            aufklapp_widgets.append(verlauf_knopf)
+        patient_knopf.clicked.connect(
+            lambda _, w=aufklapp_widgets: self._patient_toggle(w)
+        )
+
+    def _genesungsverlauf_knopf_bauen(self, patient_ordner):
+        """Heatmap-Knopf fuer den neuesten gespeicherten Genesungsverlauf,
+        None wenn der Patient keinen hat."""
+        verlauf_ordner = patient_ordner / "genesungsverlauf"
+        if not verlauf_ordner.is_dir():
+            return None
+        verlaeufe = [v for v in verlauf_ordner.iterdir() if v.is_dir() and list(v.glob("*.obj"))]
+        if not verlaeufe:
+            return None
+        neuester = max(verlaeufe, key=lambda v: v.stat().st_mtime)
+
+        knopf = QToolButton()
+        knopf.setIconSize(QSize(28, 28))
+        knopf.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
+        knopf.setIcon(QIcon(str(ICON_ORDNER / "heatmap3D.svg")))
+        knopf.setToolTip(f"Genesungsverlauf: {neuester.name}")
+        knopf.clicked.connect(lambda _, pf=neuester: self._scan_laden_aus_pfad(pf))
+        # Platz bleibt reserviert, damit der Avatar beim Aufklappen nicht springt
+        sp = knopf.sizePolicy()
+        sp.setRetainSizeWhenHidden(True)
+        knopf.setSizePolicy(sp)
+        knopf.setVisible(False)
+        return knopf
+
+
+    def _untersuchung_block_bauen(self, eltern_layout, zeile, nummer, typen):
+        # Gleiche Breite wie der Patient-Avatar darueber; der Text braucht
+        # dafuer den Umbruch.
+        u_knopf = QPushButton(f"Untersuchung\n{nummer}")
+        u_knopf.setObjectName("untersuchung_knopf")
+        u_knopf.setFixedWidth(NAV_KNOPF_BREITE)
+        eltern_layout.addWidget(u_knopf, zeile, 1, alignment=Qt.AlignTop)
+
+        # Piktogramm-Spalte links daneben (anfangs versteckt)
+        pikto_container = QWidget()
+        pikto_container.setFixedWidth(PIKTO_GROESSE)
+        p_layout = QVBoxLayout(pikto_container)
+        p_layout.setContentsMargins(0, 0, 0, 0)
+        p_layout.setSpacing(4)
+        pikto_container.setVisible(False)
+        eltern_layout.addWidget(pikto_container, zeile, 0, alignment=Qt.AlignTop)
+
+        ICON_ZU_LABEL = {
+            "original": "hand.svg",
+            "isoliert": "finger.svg",
+            "markiert (vom Original)": "stift.svg",
+            "markiert (vom isolierten)": "stift.svg",
+            "genesungsverlauf": "heatmap3D.svg",
+        }
+        for typ_label, pfad in typen.items():
+            pikto = QToolButton()
+            pikto.setIconSize(QSize(28, 28))
+            pikto.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
+            pikto.setIcon(QIcon(str(ICON_ORDNER / ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
+            pikto.setToolTip(typ_label)
+            pikto.clicked.connect(lambda _, pf=pfad: self._scan_laden_aus_pfad(pf))
+            p_layout.addWidget(pikto)
+
+        u_knopf.clicked.connect(
+            lambda _, c=pikto_container: self._untersuchung_toggle(c)
+        )
+
+    def _patient_toggle(self, widgets):
+        """widgets[0] ist der Untersuchungs-Container, der Rest (z.B. der
+        Genesungsverlauf-Knopf) klappt mit ihm auf und zu."""
+        # anderen offenen Patienten zuklappen
+        if self._offener_patient is not None and self._offener_patient is not widgets:
+            for w in self._offener_patient:
+                w.setVisible(False)
+        oeffnen = not widgets[0].isVisible()
+        for w in widgets:
+            w.setVisible(oeffnen)
+        self._offener_patient = widgets if oeffnen else None
+
+    def _untersuchung_toggle(self, container):
+        if self._offene_untersuchung is not None and self._offene_untersuchung is not container:
+            self._offene_untersuchung.setVisible(False)
+        container.setVisible(not container.isVisible())
+        self._offene_untersuchung = container if container.isVisible() else None
+
+    def _scan_laden_aus_pfad(self, pfad):
+        ordner = Path(pfad)
+        if not ordner.is_dir():
+            self.hinweis_label.setText("Scan-Ordner existiert nicht mehr.")
+            return
+        self.aktueller_ordner = ordner
+        self.lade_und_zeige(ordner)
 
     # ---------- Finger isolieren ----------
 
