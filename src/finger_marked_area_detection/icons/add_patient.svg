@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="28.801472mm"
+   height="28.800762mm"
+   viewBox="0 0 28.801472 28.800762"
+   version="1.1"
+   id="svg1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="layer1"
+     transform="translate(-90.599266,-134.09962)">
+    <rect
+       style="fill:#ffffff;fill-opacity:1;fill-rule:evenodd;stroke:#4a90d9;stroke-width:0.8;stroke-dasharray:3.2, 0.8;stroke-dashoffset:0;stroke-opacity:1"
+       id="rect1"
+       width="28"
+       height="28"
+       x="90.999908"
+       y="134.49962"
+       rx="8"
+       ry="8" />
+    <text
+       xml:space="preserve"
+       style="font-size:60.6459px;font-family:'Latin Modern Math';-inkscape-font-specification:'Latin Modern Math, Normal';writing-mode:lr-tb;direction:ltr;fill:#4a90d9;fill-opacity:1;fill-rule:evenodd;stroke:#ffffff;stroke-width:0.799999;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+       x="98.967491"
+       y="155.97183"
+       id="text2"><tspan
+         id="tspan2"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:21.1667px;font-family:Sans;-inkscape-font-specification:'Sans, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#4a90d9;fill-opacity:1;stroke:#ffffff;stroke-width:0.8;stroke-dasharray:none;stroke-opacity:1"
+         x="98.967491"
+         y="155.97183">+</tspan></text>
+  </g>
+</svg>

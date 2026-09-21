@@ -1,5 +1,6 @@
 
 import sys
+import shutil
 from matplotlib import container
 import pyvista as p_v
 import numpy as np
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QDialogButtonBox,
+    QInputDialog,
+    QMessageBox,
     QToolButton,
     QTableWidget,
     QTableWidgetItem,
@@ -34,6 +37,8 @@ from PySide6.QtCore import (
     QSize,
     QSettings,
     QUrl,
+    QFileSystemWatcher,
+    QTimer,
     )
 from PySide6.QtGui import (
     QIcon,
@@ -90,6 +95,7 @@ from heatmap2D import heatmap_main
 KNOPF_BREITE = 192
 NAV_KNOPF_BREITE = 80   # Patient-Avatar und Untersuchungs-Knopf
 PIKTO_GROESSE = 34      # Typ-Piktogramme links neben der Untersuchung
+NEU_UNTERSUCHUNG_HOEHE = 36   # wie ein Untersuchungs-Knopf, passend zu add_Untersuchung.svg
 NAV_ABSTAND = 4         # zwischen Piktogramm und Knopf, und Rand der Nav-Spalte
 KNOPF_HOEHE = 108
 HINWEIS_MAX_ZEILEN = 3
@@ -381,6 +387,18 @@ class HauptFenster(QMainWindow):
         self.viewer_spalte.installEventFilter(self)
         self._positioniere_overlay_buttons()
 
+        # Beobachtet den geoeffneten Patienten auf der Platte: was dort neu
+        # gespeichert wird (isolierter Finger, Markierung, Vermessung,
+        # Genesungsverlauf, ...), taucht ohne Neustart in der Nav-Spalte auf.
+        self._patient_waechter = QFileSystemWatcher(self)
+        self._patient_waechter.directoryChanged.connect(lambda _: self._waechter_timer.start())
+        
+        self._waechter_timer = QTimer(self)
+        self._waechter_timer.setSingleShot(True)
+        self._waechter_timer.setInterval(400)
+        self._waechter_timer.timeout.connect(self._patienten_pruefen)
+        self._angezeigte_signaturen = {}
+
         self._root_ordner_anwenden()
         self.baum_neu_aufbauen()
     # ---------- kleine Bau-Helfer ----------
@@ -459,6 +477,8 @@ class HauptFenster(QMainWindow):
                 )
 
     def lade_und_zeige(self, pfad: Path):
+        # Patient des geladenen Scans mitbeobachten
+        self._patienten_beobachten()
         self.plotter.clear()
         teile = load_teilmeshe_mit_textur(pfad)
 
@@ -557,8 +577,8 @@ class HauptFenster(QMainWindow):
         return scan_name, "original"
 
     def baum_neu_aufbauen(self):
-        """Baut die Navigations-Spalte: Patienten als Avatar-Knoepfe,
-        darunter aufklappbar die Untersuchungen, darunter die Typ-Piktogramme."""
+        #Baut die Navigations-Spalte: Patienten als Avatar-Knoepfe,
+        #darunter aufklappbar die Untersuchungen, darunter die Typ-Piktogramme.
         # Alte Patienten-Widgets entfernen (Einstellungsknopf behalten)
         while self.nav_layout.count() > 1:
             item = self.nav_layout.takeAt(1)
@@ -567,21 +587,287 @@ class HauptFenster(QMainWindow):
 
         self._offener_patient = None
         self._offene_untersuchung = None
+        self._offener_patient_name = None
+        self._offene_untersuchung_schluessel = None
         self._patient_aufklapp_widgets = {}
+        self._untersuchung_container = {}
+        self._angezeigte_signaturen = {}
 
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
             return
 
         root = Path(self.root_ordner)
         for patient_ordner in sorted(p for p in root.iterdir() if p.is_dir()):
+            # Stand merken, den die Spalte ab jetzt anzeigt, dagegen prueft
+            # der Waechter. Fuer alle Patienten, nicht nur die beobachteten:
+            # wer spaeter aufgeklappt wird, braucht den Vergleich auch.
+            self._angezeigte_signaturen[patient_ordner.resolve()] = self._patient_signatur(patient_ordner)
             struktur = self._untersuchungen_sammeln(patient_ordner)
-            if not struktur:
+            
+            if not struktur and not any((patient_ordner / t).is_dir() for t in self.TYP_ORDNER):
                 continue
             self._patient_block_bauen(patient_ordner, struktur)
 
+        self._neuer_patient_knopf_bauen()
+        self._patienten_beobachten()
+
+
+    # ---------- Nav-Spalte aktuell halten ----------
+
+    def _nav_aktualisieren(self):
+        #neu aufbauen die navsplte, und den aktuellen pat und scrollstelle etc gleich lassen
+        patient = self._offener_patient_name
+        untersuchung = self._offene_untersuchung_schluessel
+        scroll = self.nav_spalte.verticalScrollBar().value()
+
+        self.baum_neu_aufbauen()
+        if patient in self._patient_aufklapp_widgets:
+            self._patient_toggle(self._patient_aufklapp_widgets[patient])
+        if untersuchung in self._untersuchung_container:
+            self._untersuchung_toggle(self._untersuchung_container[untersuchung])
+        # Das Layout steht erst nach dem nächsten Event-Durchlauf
+        QTimer.singleShot(0, lambda: self.nav_spalte.verticalScrollBar().setValue(scroll))
+
+    def _patient_signatur(self, patient_ordner):
+        #Alles, was die Nav-Spalte von einem Patienten anzeigt. Aendert
+        #sich das, muss neu gebaut werden
+        struktur = self._untersuchungen_sammeln(patient_ordner) if patient_ordner.is_dir() else {}
+        return (
+            tuple((basis, tuple(sorted(typen.items()))) for basis, typen in struktur.items()),
+            self._neuester_genesungsverlauf(patient_ordner),
+            (patient_ordner / "heatmap" / "Genesungsverlauf.png").is_file(),
+        )
+
+    def _beobachtete_patienten(self):
+        #Der aufgeklappte Patient und der Patient des geladenen Scans.
+        if not self.root_ordner or not Path(self.root_ordner).is_dir():
+            return set()
+        root = Path(self.root_ordner).resolve()
+        patienten = set()
+        if self._offener_patient_name:
+            patienten.add(root / self._offener_patient_name)
+        if self.aktueller_ordner is not None:
+            for vorfahr in Path(self.aktueller_ordner).resolve().parents:
+                if vorfahr.parent == root:
+                    patienten.add(vorfahr)
+                    break
+        return patienten
+
+    def _patienten_beobachten(self):
+        #Wächter auf die aktuell relevanten Patienten umstellen.
+        
+        if not hasattr(self, "_patient_waechter"):
+            return
+        patienten = self._beobachtete_patienten()
+
+        pfade = set()
+        for patient in patienten:
+            if not patient.is_dir():
+                continue
+            pfade.add(str(patient))
+            for typ in (d for d in patient.iterdir() if d.is_dir()):
+                pfade.add(str(typ))
+                pfade.update(str(scan) for scan in typ.iterdir() if scan.is_dir())
+
+        bisher = set(self._patient_waechter.directories())
+        if bisher - pfade:
+            self._patient_waechter.removePaths(list(bisher - pfade))
+        if pfade - bisher:
+            self._patient_waechter.addPaths(list(pfade - bisher))
+        
+
+    def _patienten_pruefen(self):
+        #Weicht die Platte von dem ab, was die Nav-Spalte zeigt?
+        geaendert = any(self._patient_signatur(p) != self._angezeigte_signaturen.get(p)
+                        for p in self._beobachtete_patienten())
+        if geaendert:
+            self._nav_aktualisieren()      # baut neu und beobachtet dabei neu
+        else:
+            # Nichts Sichtbares neu - aber evtl. neue Unterordner, die ab
+            # jetzt mitbeobachtet werden muessen
+            self._patienten_beobachten()
+
+    def _neuer_patient_knopf_bauen(self):
+        #'''+'-Knopf am Ende der Patientenliste, gleiche Groesse und Flucht
+        # wie die Patienten-Avatare darueber.'''
+        knopf = QToolButton()
+        knopf.setObjectName("patient_knopf")
+        knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        knopf.setFixedSize(NAV_KNOPF_BREITE, NAV_KNOPF_BREITE)
+        knopf.setIconSize(QSize(44, 44))
+        knopf.setIcon(QIcon(str(ICON_ORDNER / "add_patient.svg")))
+        knopf.setText("Neu")
+        knopf.setToolTip("Neuen Patienten anlegen")
+        knopf.clicked.connect(self.neuer_patient_klick)
+
+        zeile = QWidget()
+        z_layout = QHBoxLayout(zeile)
+        z_layout.setContentsMargins(0, 0, 0, 0)
+        z_layout.setSpacing(0)
+        # Platz der Patienten-Piktogramme freihalten -> buendig mit den Avataren
+        z_layout.addSpacing(PIKTO_GROESSE + NAV_ABSTAND)
+        z_layout.addWidget(knopf)
+        self.nav_layout.addWidget(zeile, alignment=Qt.AlignLeft)
+
+    def neuer_patient_klick(self):
+        root = Path(self.root_ordner)
+        name = ""
+        while True:
+            name, ok = QInputDialog.getText(self, "Neuer Patient", "Name des Patienten:", text=name)
+            if not ok:
+                return
+            name = name.strip()
+            fehler = self._ordner_name_pruefen(root, name)
+            if fehler is None:
+                break
+            QMessageBox.warning(self, "Neuer Patient", fehler)
+
+        patient_ordner = root / name
+        try:
+            patient_ordner.mkdir()
+            # Die Scan-Typ-Ordner gleich mit anlegen: daran erkennt die
+            # Nav-Spalte einen Patientenordner, auch solange er leer ist.
+            for typ in self.TYP_ORDNER:
+                (patient_ordner / typ).mkdir()
+        except OSError as e:
+            QMessageBox.warning(self, "Neuer Patient", f"Ordner konnte nicht angelegt werden:\n{e}")
+            return
+
+        self.baum_neu_aufbauen()
+        if name in self._patient_aufklapp_widgets:
+            self._patient_toggle(self._patient_aufklapp_widgets[name])
+        self.hinweis_label.setText(f"Patient '{name}' angelegt.")
+
+    @staticmethod
+    def _ordner_name_pruefen(eltern, name):
+        #Taugt 'name' als neuer Ordner in 'eltern'? Fehlermeldung als Text,
+        #oder None falls ja
+        if not name:
+            return "Bitte einen Namen eingeben."
+        if name in (".", ".."):
+            return f"'{name}' ist als Name nicht erlaubt."
+        if any(z in name for z in '/\\:*?"<>|'):
+            return 'Der Name darf keines dieser Zeichen enthalten:  / \\ : * ? " < > |'
+        # Gross/klein ignorieren - auf Windows waeren 'Pat1' und 'pat1'
+        # derselbe Ordner.
+        vorhanden = {p.name.lower() for p in eltern.iterdir()} if eltern.is_dir() else set()
+        if name.lower() in vorhanden:
+            return f"'{name}' gibt es hier bereits."
+        return None
+
+    # ---------- Neuen Scan hinzufuegen ----------
+
+    BILD_ENDUNGEN = (".png", ".jpg", ".jpeg")
+
+    def neuer_scan_klick(self, patient_ordner):
+        dateien, _ = QFileDialog.getOpenFileNames(
+            self, f"Scan für {patient_ordner.name} hinzufügen, bitte .obj, .mtl und Texturbilder auswählen",
+            str(Path.home()),
+            "Scan-Dateien (*.obj *.mtl *.png *.jpg *.jpeg);;Alle Dateien (*)")
+        if not dateien:
+            return
+        dateien = [Path(d) for d in dateien]
+
+        fehler = self._scan_dateien_pruefen(dateien)
+        if fehler:
+            QMessageBox.warning(
+                self, "Scan unvollständig",
+                "Der Scan kann so nicht hinzugefügt werden:\n\n"
+                + "\n".join(f"•  {f}" for f in fehler))
+            return
+
+        # Name der Untersuchung = Name des Scan-Ordners
+        ziel_eltern = patient_ordner / "originale_scans"
+        obj = next(d for d in dateien if d.suffix.lower() == ".obj")
+        name = obj.stem
+        while True:
+            name, ok = QInputDialog.getText(
+                self, "Neuer Scan", "Name der Untersuchung (Ordnername):", text=name)
+            if not ok:
+                return
+            name = name.strip()
+            fehler_name = self._ordner_name_pruefen(ziel_eltern, name) or self._scan_name_pruefen(name)
+            if fehler_name is None:
+                break
+            QMessageBox.warning(self, "Neuer Scan", fehler_name)
+
+        ziel = ziel_eltern / name
+        try:
+            ziel.mkdir(parents=True)
+            for d in dateien:
+                shutil.copy2(d, ziel / d.name)
+        except OSError as e:
+            # halb kopierten Ordner nicht liegen lassen - der wuerde sonst
+            # als kaputte Untersuchung in der Nav-Spalte auftauchen
+            shutil.rmtree(ziel, ignore_errors=True)
+            QMessageBox.warning(self, "Neuer Scan", f"Kopieren fehlgeschlagen:\n{e}")
+            return
+
+        self._nav_aktualisieren()
+        self.hinweis_label.setText(f"Scan '{name}' zu {patient_ordner.name} hinzugefügt.")
+
+    @classmethod
+    def _scan_dateien_pruefen(cls, dateien):
+        
+        objs = [d for d in dateien if d.suffix.lower() == ".obj"]
+        mtls = [d for d in dateien if d.suffix.lower() == ".mtl"]
+        bilder = [d for d in dateien if d.suffix.lower() in cls.BILD_ENDUNGEN]
+        fehler = []
+
+        if not objs:
+            fehler.append("Es fehlt die .obj-Datei (das 3D-Modell).")
+        elif len(objs) > 1:
+            fehler.append(f"Mehrere .obj-Dateien ausgewählt ({', '.join(d.name for d in objs)}) – bitte nur eine.")
+        if not mtls:
+            fehler.append("Es fehlt die .mtl-Datei (die Materialbeschreibung).")
+        elif len(mtls) > 1:
+            fehler.append(f"Mehrere .mtl-Dateien ausgewählt ({', '.join(d.name for d in mtls)}) – bitte nur eine.")
+        if not bilder:
+            fehler.append("Es fehlt mindestens ein Texturbild (.png oder .jpg).")
+
+        # Passen die Dateien auch zusammen? Die .obj nennt ihre .mtl, die
+        # .mtl nennt ihre Bilder - fehlt eins davon, laedt der Scan ohne Textur.
+        if len(objs) == 1 and len(mtls) == 1:
+            erwartet = cls._verweise(objs[0], "mtllib")
+            if erwartet and mtls[0].name not in erwartet:
+                fehler.append(f"Die .obj erwartet '{', '.join(erwartet)}', ausgewählt ist aber '{mtls[0].name}'.")
+        if len(mtls) == 1 and bilder:
+            vorhanden = {b.name for b in bilder}
+            fehlend = [b for b in cls._verweise(mtls[0], "map_Kd") if b not in vorhanden]
+            if fehlend:
+                fehler.append(f"Die .mtl braucht noch diese Bilder: {', '.join(fehlend)}")
+
+        return fehler
+
+    @staticmethod
+    def _verweise(datei, schluessel):
+        #Dateinamen hinter 'schluessel' (mtllib / map_Kd), ohne Doppelte.
+        #Optionen wie '-s 1 1 1' vor dem Namen werden uebersprungen - der
+        #Name steht immer am Ende der Zeile.
+        namen = []
+        try:
+            with open(datei, encoding="utf-8", errors="replace") as f:
+                for zeile in f:
+                    teile = zeile.split()
+                    if len(teile) >= 2 and teile[0] == schluessel:
+                        name = Path(teile[-1].replace("\\", "/")).name
+                        if name not in namen:
+                            namen.append(name)
+        except OSError:
+            pass
+        return namen
+
+    @staticmethod
+    def _scan_name_pruefen(name):
+        # Diese Endungen liest _scan_analysieren als Scan-Typ - ein Original
+        # mit so einem Namen wuerde falsch einsortiert.
+        for endung in ("_isoliert", "_marked", "_vermessen", "_genesungsverlauf"):
+            if name.endswith(endung):
+                return f"Der Name darf nicht auf '{endung}' enden – das ist für bearbeitete Scans reserviert."
+        return None
 
     def _untersuchungen_sammeln(self, patient_ordner):
-        """{untersuchung_basis: {typ_label: pfad}}, lexikografisch nach Basis."""
+        #{untersuchung_basis: {typ_label: pfad}}, lexikografisch nach Basis."""
         untersuchungen = defaultdict(dict)
         for typ in self.TYP_ORDNER:
             typ_pfad = patient_ordner / typ
@@ -604,9 +890,7 @@ class HauptFenster(QMainWindow):
         patient_knopf.setText(patient_name)
         patient_knopf.setObjectName("patient_knopf")
 
-        # Zeile: [Patienten-Piktogramme] [Avatar] - gleiche Aufteilung wie
-        # die Untersuchungs-Zeilen darunter, damit der Avatar buendig ueber
-        # den Untersuchungs-Knoepfen sitzt.
+       
         patient_zeile = QWidget()
         pz_layout = QHBoxLayout(patient_zeile)
         pz_layout.setContentsMargins(0, 0, 0, 0)
@@ -621,9 +905,7 @@ class HauptFenster(QMainWindow):
         pp_layout.setSpacing(NAV_ABSTAND)
         pp_layout.setAlignment(Qt.AlignTop)
 
-        patient_knoepfe = [k for k in (self._genesungsverlauf_knopf_bauen(patient_ordner),
-                                       self._heatmap_2d_knopf_bauen(patient_ordner))
-                           if k is not None]
+        patient_knoepfe = [k for k in (self._genesungsverlauf_knopf_bauen(patient_ordner), self._heatmap_2d_knopf_bauen(patient_ordner)) if k is not None]
         for k in patient_knoepfe:
             pp_layout.addWidget(k)
 
@@ -646,7 +928,18 @@ class HauptFenster(QMainWindow):
 
         # Untersuchungen generisch nummeriert
         for nummer, (basis, typen) in enumerate(struktur.items(), start=1):
-            self._untersuchung_block_bauen(uc_layout, nummer - 1, nummer, typen)
+            self._untersuchung_block_bauen(uc_layout, nummer - 1, nummer, typen,
+                                           schluessel=(patient_name, basis))
+
+        # Unter der letzten Untersuchung: neuen Scan hinzufuegen
+        neu_knopf = QToolButton()
+        neu_knopf.setObjectName("untersuchung_neu_knopf")
+        neu_knopf.setFixedSize(NAV_KNOPF_BREITE, NEU_UNTERSUCHUNG_HOEHE)
+        neu_knopf.setIconSize(QSize(NAV_KNOPF_BREITE, NEU_UNTERSUCHUNG_HOEHE))
+        neu_knopf.setIcon(QIcon(str(ICON_ORDNER / "add_Untersuchung.svg")))
+        neu_knopf.setToolTip("Neuen Scan hinzufügen")
+        neu_knopf.clicked.connect(lambda _, po=patient_ordner: self.neuer_scan_klick(po))
+        uc_layout.addWidget(neu_knopf, len(struktur), 1, alignment=Qt.AlignTop)
 
         # Patienten-Piktogramme nur bei aufgeklapptem Patienten zeigen
         aufklapp_widgets = [untersuchungen_container, *patient_knoepfe]
@@ -655,16 +948,22 @@ class HauptFenster(QMainWindow):
             lambda _, w=aufklapp_widgets: self._patient_toggle(w)
         )
 
-    def _genesungsverlauf_knopf_bauen(self, patient_ordner):
-        """Heatmap-Knopf fuer den neuesten gespeicherten Genesungsverlauf,
-        None wenn der Patient keinen hat."""
+    @staticmethod
+    def _neuester_genesungsverlauf(patient_ordner):
         verlauf_ordner = patient_ordner / "genesungsverlauf"
         if not verlauf_ordner.is_dir():
             return None
         verlaeufe = [v for v in verlauf_ordner.iterdir() if v.is_dir() and list(v.glob("*.obj"))]
         if not verlaeufe:
             return None
-        neuester = max(verlaeufe, key=lambda v: v.stat().st_mtime)
+        return max(verlaeufe, key=lambda v: v.stat().st_mtime)
+
+    def _genesungsverlauf_knopf_bauen(self, patient_ordner):
+        """Heatmap-Knopf fuer den neuesten gespeicherten Genesungsverlauf,
+        None wenn der Patient keinen hat."""
+        neuester = self._neuester_genesungsverlauf(patient_ordner)
+        if neuester is None:
+            return None
 
         return self._patient_pikto(
             "heatmap3D.svg", f"3D-Genesungsverlauf: {neuester.name}",
@@ -690,7 +989,7 @@ class HauptFenster(QMainWindow):
         return knopf
 
 
-    def _untersuchung_block_bauen(self, eltern_layout, zeile, nummer, typen):
+    def _untersuchung_block_bauen(self, eltern_layout, zeile, nummer, typen, schluessel=None):
         # Gleiche Breite wie der Patient-Avatar darueber; der Text braucht
         # dafuer den Umbruch.
         u_knopf = QPushButton(f"Untersuchung\n{nummer}")
@@ -706,6 +1005,8 @@ class HauptFenster(QMainWindow):
         p_layout.setSpacing(4)
         pikto_container.setVisible(False)
         eltern_layout.addWidget(pikto_container, zeile, 0, alignment=Qt.AlignTop)
+        if schluessel is not None:
+            self._untersuchung_container[schluessel] = pikto_container
 
         ICON_ZU_LABEL = {
             "original": "hand.svg",
@@ -742,12 +1043,20 @@ class HauptFenster(QMainWindow):
         for w in widgets:
             w.setVisible(oeffnen)
         self._offener_patient = widgets if oeffnen else None
+        self._offener_patient_name = next(
+            (n for n, w in self._patient_aufklapp_widgets.items() if w is self._offener_patient), None)
+        self._patienten_beobachten()
+        if oeffnen:
+            # Was sich getan hat, waehrend der Patient zu (= unbeobachtet) war
+            self._waechter_timer.start()
 
     def _untersuchung_toggle(self, container):
         if self._offene_untersuchung is not None and self._offene_untersuchung is not container:
             self._offene_untersuchung.setVisible(False)
         container.setVisible(not container.isVisible())
         self._offene_untersuchung = container if container.isVisible() else None
+        self._offene_untersuchung_schluessel = next(
+            (k for k, c in self._untersuchung_container.items() if c is self._offene_untersuchung), None)
 
     def _vermessung_anzeigen(self, pfad):
         """Vermessenen Scan laden und, falls vorhanden, die Ergebnisliste zeigen."""

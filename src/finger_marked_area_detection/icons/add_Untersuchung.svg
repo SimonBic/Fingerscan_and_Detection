@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- 80 x 36 Einheiten = genau die Knopfgroesse in Pixeln (NAV_KNOPF_BREITE x
+     NEU_UNTERSUCHUNG_HOEHE), damit jede Kante auf einem ganzen Pixel liegt. -->
+<svg width="80" height="36" viewBox="0 0 80 36" version="1.1"
+     xmlns="http://www.w3.org/2000/svg">
+  <!-- Rahmen: 2px, liegt vollstaendig innerhalb der Flaeche -->
+  <rect x="1" y="1" width="78" height="34" rx="10" ry="10"
+        style="fill:#ffffff;stroke:#4a90d9;stroke-width:2;stroke-dasharray:8,2"/>
+  <!-- Plus als Form statt Schriftzeichen: 4px stark, 16px gross, exakt mittig -->
+  <rect x="38" y="10" width="4" height="16" rx="1" style="fill:#4a90d9"/>
+  <rect x="32" y="16" width="16" height="4" rx="1" style="fill:#4a90d9"/>
+</svg>

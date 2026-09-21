@@ -28,15 +28,21 @@ QToolButton#patient_knopf {
     font-size: 10px;
 }
 QToolButton#patient_knopf:hover { background: #E0E8F0; }
+/* Aussehen (Verlauf, blauer Rand, Hover) kommt vom allgemeinen
+   QPushButton oben. Hier nur, was fuer die 80px Breite noetig ist -
+   KEIN background/border setzen: ein #id-Selektor schlaegt
+   QPushButton:hover, der Hover-Effekt waere sonst weg. */
 QPushButton#untersuchung_knopf {
-    text-align: center;
     padding: 4px 2px;
-    border: none;
-    border-radius: 6px;
-    background: #F6F6F4;
     font-size: 10px;
 }
-QPushButton#untersuchung_knopf:hover { background: #EAF1F7; }
+
+/* Das SVG ist der ganze Knopf - kein eigener Rahmen/Hintergrund */
+QToolButton#untersuchung_neu_knopf {
+    border: none;
+    background: transparent;
+    padding: 0px;
+}
 
 QPushButton#overlay_button {
     border-radius: 0px;
