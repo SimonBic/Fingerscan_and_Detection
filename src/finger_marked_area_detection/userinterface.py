@@ -24,15 +24,21 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QDialogButtonBox,
     QToolButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
     )
 from PySide6.QtCore import (
     Qt,
     QEvent,
     QSize,
     QSettings,
+    QUrl,
     )
 from PySide6.QtGui import (
-    QIcon
+    QIcon,
+    QDesktopServices,
+    QPixmap,
 )
 from pyvistaqt import QtInteractor
 
@@ -533,10 +539,15 @@ class HauptFenster(QMainWindow):
             return
         self.baum_neu_aufbauen()
 
-    TYP_ORDNER = ["originale_scans", "isolierte_scans", "markierte_scans"]
+    TYP_ORDNER = ["originale_scans", "isolierte_scans", "markierte_scans", "vermessene_scans"]
 
     def _scan_analysieren(self, scan_name):
-        
+        # Vermessen wird auf einem beliebigen Scan (original, isoliert,
+        # markiert) - die Herkunft kommt ins Label, damit sich zwei
+        # Vermessungen derselben Untersuchung nicht ueberschreiben.
+        if scan_name.endswith("_vermessen"):
+            basis, herkunft = self._scan_analysieren(scan_name[:-len("_vermessen")])
+            return basis, f"vermessen – {herkunft}"
         if scan_name.endswith("_isoliert_marked"):
             return scan_name[:-len("_isoliert_marked")], "markiert (vom isolierten)"
         if scan_name.endswith("_marked"):
@@ -556,6 +567,7 @@ class HauptFenster(QMainWindow):
 
         self._offener_patient = None
         self._offene_untersuchung = None
+        self._patient_aufklapp_widgets = {}
 
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
             return
@@ -592,7 +604,7 @@ class HauptFenster(QMainWindow):
         patient_knopf.setText(patient_name)
         patient_knopf.setObjectName("patient_knopf")
 
-        # Zeile: [Genesungsverlauf-Knopf] [Avatar] - gleiche Aufteilung wie
+        # Zeile: [Patienten-Piktogramme] [Avatar] - gleiche Aufteilung wie
         # die Untersuchungs-Zeilen darunter, damit der Avatar buendig ueber
         # den Untersuchungs-Knoepfen sitzt.
         patient_zeile = QWidget()
@@ -600,11 +612,22 @@ class HauptFenster(QMainWindow):
         pz_layout.setContentsMargins(0, 0, 0, 0)
         pz_layout.setSpacing(NAV_ABSTAND)
 
-        verlauf_knopf = self._genesungsverlauf_knopf_bauen(patient_ordner)
-        if verlauf_knopf is not None:
-            pz_layout.addWidget(verlauf_knopf, alignment=Qt.AlignTop)
-        else:
-            pz_layout.addSpacing(PIKTO_GROESSE)
+        # Senkrechte Spalte fuer alles, was den ganzen Patienten betrifft
+        # (3D-Verlauf, 2D-Heatmap). Zwei Knoepfe passen neben den Avatar.
+        patient_piktos = QWidget()
+        patient_piktos.setFixedWidth(PIKTO_GROESSE)
+        pp_layout = QVBoxLayout(patient_piktos)
+        pp_layout.setContentsMargins(0, 0, 0, 0)
+        pp_layout.setSpacing(NAV_ABSTAND)
+        pp_layout.setAlignment(Qt.AlignTop)
+
+        patient_knoepfe = [k for k in (self._genesungsverlauf_knopf_bauen(patient_ordner),
+                                       self._heatmap_2d_knopf_bauen(patient_ordner))
+                           if k is not None]
+        for k in patient_knoepfe:
+            pp_layout.addWidget(k)
+
+        pz_layout.addWidget(patient_piktos)
         pz_layout.addWidget(patient_knopf)
         self.nav_layout.addWidget(patient_zeile, alignment=Qt.AlignLeft)
 
@@ -625,10 +648,9 @@ class HauptFenster(QMainWindow):
         for nummer, (basis, typen) in enumerate(struktur.items(), start=1):
             self._untersuchung_block_bauen(uc_layout, nummer - 1, nummer, typen)
 
-        # Genesungsverlauf-Knopf nur bei aufgeklapptem Patienten zeigen
-        aufklapp_widgets = [untersuchungen_container]
-        if verlauf_knopf is not None:
-            aufklapp_widgets.append(verlauf_knopf)
+        # Patienten-Piktogramme nur bei aufgeklapptem Patienten zeigen
+        aufklapp_widgets = [untersuchungen_container, *patient_knoepfe]
+        self._patient_aufklapp_widgets[patient_name] = aufklapp_widgets
         patient_knopf.clicked.connect(
             lambda _, w=aufklapp_widgets: self._patient_toggle(w)
         )
@@ -644,16 +666,26 @@ class HauptFenster(QMainWindow):
             return None
         neuester = max(verlaeufe, key=lambda v: v.stat().st_mtime)
 
+        return self._patient_pikto(
+            "heatmap3D.svg", f"3D-Genesungsverlauf: {neuester.name}",
+            lambda _, pf=neuester: self._scan_laden_aus_pfad(pf))
+
+    def _heatmap_2d_knopf_bauen(self, patient_ordner):
+        """Knopf fuer die 2D-Heatmap aus heatmap_main(), None wenn es keine gibt."""
+        bild = patient_ordner / "heatmap" / "Genesungsverlauf.png"
+        if not bild.is_file():
+            return None
+        return self._patient_pikto(
+            "heatmap2D.svg", "2D-Heatmap / Genesungsverlauf",
+            lambda _, pf=bild: self._bild_zeigen(pf))
+
+    def _patient_pikto(self, icon_datei, tooltip, slot):
         knopf = QToolButton()
         knopf.setIconSize(QSize(28, 28))
         knopf.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
-        knopf.setIcon(QIcon(str(ICON_ORDNER / "heatmap3D.svg")))
-        knopf.setToolTip(f"Genesungsverlauf: {neuester.name}")
-        knopf.clicked.connect(lambda _, pf=neuester: self._scan_laden_aus_pfad(pf))
-        # Platz bleibt reserviert, damit der Avatar beim Aufklappen nicht springt
-        sp = knopf.sizePolicy()
-        sp.setRetainSizeWhenHidden(True)
-        knopf.setSizePolicy(sp)
+        knopf.setIcon(QIcon(str(ICON_ORDNER / icon_datei)))
+        knopf.setToolTip(tooltip)
+        knopf.clicked.connect(slot)
         knopf.setVisible(False)
         return knopf
 
@@ -686,9 +718,13 @@ class HauptFenster(QMainWindow):
             pikto = QToolButton()
             pikto.setIconSize(QSize(28, 28))
             pikto.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
-            pikto.setIcon(QIcon(str(ICON_ORDNER / ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
             pikto.setToolTip(typ_label)
-            pikto.clicked.connect(lambda _, pf=pfad: self._scan_laden_aus_pfad(pf))
+            if typ_label.startswith("vermessen"):
+                pikto.setIcon(QIcon(str(ICON_ORDNER / "vermessen.svg")))
+                pikto.clicked.connect(lambda _, pf=pfad: self._vermessung_anzeigen(pf))
+            else:
+                pikto.setIcon(QIcon(str(ICON_ORDNER / ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
+                pikto.clicked.connect(lambda _, pf=pfad: self._scan_laden_aus_pfad(pf))
             p_layout.addWidget(pikto)
 
         u_knopf.clicked.connect(
@@ -712,6 +748,95 @@ class HauptFenster(QMainWindow):
             self._offene_untersuchung.setVisible(False)
         container.setVisible(not container.isVisible())
         self._offene_untersuchung = container if container.isVisible() else None
+
+    def _vermessung_anzeigen(self, pfad):
+        """Vermessenen Scan laden und, falls vorhanden, die Ergebnisliste zeigen."""
+        self._scan_laden_aus_pfad(pfad)
+        liste = self._vermessungs_liste_finden(Path(pfad))
+        if liste is not None:
+            self._ergebnis_liste_zeigen(liste)
+
+    def _vermessungs_liste_finden(self, scan_ordner):
+        # schreibe_ergebnis_liste() legt die Liste neben den Scan-Ordner
+        # (direkt in 'vermessene_scans'); im Ordner selbst nur als Rueckfall.
+        for kandidat in (scan_ordner.parent / f"{scan_ordner.name}.xlsx",
+                         scan_ordner / f"{scan_ordner.name}.xlsx"):
+            if kandidat.is_file():
+                return kandidat
+        return None
+
+    def _ergebnis_liste_zeigen(self, xlsx_pfad):
+        """Zeigt die Excel-Liste in einem Nebenfenster."""
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            # ohne openpyxl wenigstens im Standardprogramm oeffnen
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(xlsx_pfad)))
+            return
+
+        blatt = load_workbook(xlsx_pfad, read_only=True, data_only=True).active
+        zeilen = [["" if w is None else str(w) for w in zeile]
+                  for zeile in blatt.iter_rows(values_only=True)]
+
+        fenster, layout = self._neben_fenster(xlsx_pfad.stem)
+
+        tabelle = QTableWidget(len(zeilen), max((len(z) for z in zeilen), default=0))
+        tabelle.setEditTriggers(QTableWidget.NoEditTriggers)
+        tabelle.horizontalHeader().setVisible(False)
+        tabelle.verticalHeader().setVisible(False)
+        for r, zeile in enumerate(zeilen):
+            for c, wert in enumerate(zeile):
+                tabelle.setItem(r, c, QTableWidgetItem(wert))
+        tabelle.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        layout.addWidget(tabelle)
+
+        oeffnen = QPushButton("In Excel öffnen")
+        oeffnen.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(xlsx_pfad))))
+        layout.addWidget(oeffnen)
+
+        fenster.resize(420, 320)
+        fenster.show()
+
+    def _bild_zeigen(self, png_pfad):
+        """Zeigt ein gespeichertes Bild (2D-Heatmap) in einem Nebenfenster."""
+        bild = QPixmap(str(png_pfad))
+        if bild.isNull():
+            self.hinweis_label.setText(f"Bild konnte nicht geladen werden:\n{png_pfad}")
+            return
+
+        fenster, layout = self._neben_fenster(Path(png_pfad).parent.parent.name + " - 2D-Heatmap")
+        anzeige = QLabel()
+        anzeige.setAlignment(Qt.AlignCenter)
+        # matplotlib speichert mit 150 dpi - fuer den Bildschirm verkleinern
+        anzeige.setPixmap(bild.scaled(QSize(700, 800), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        layout.addWidget(anzeige)
+
+        oeffnen = QPushButton("Im Bildbetrachter öffnen")
+        oeffnen.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(png_pfad))))
+        layout.addWidget(oeffnen)
+
+        fenster.adjustSize()
+        fenster.show()
+
+    def _neben_fenster(self, titel):
+        """Nicht-modales Fenster neben dem Viewer (Excel-Liste, Heatmap), damit
+        man den Scan daneben weiter drehen kann. Es gibt immer nur eins - ein
+        altes wird geschlossen, sonst stapeln sie sich bei jedem Klick."""
+        if getattr(self, "_aktuelles_neben_fenster", None) is not None:
+            self._aktuelles_neben_fenster.close()
+
+        fenster = QDialog(self)
+        fenster.setWindowTitle(titel)
+        fenster.setAttribute(Qt.WA_DeleteOnClose)
+        self._aktuelles_neben_fenster = fenster
+        # Das Loeschen passiert verzoegert - nur zuruecksetzen, wenn noch
+        # kein neueres Fenster eingetragen ist.
+        fenster.destroyed.connect(lambda _=None, f=fenster: self._neben_fenster_weg(f))
+        return fenster, QVBoxLayout(fenster)
+
+    def _neben_fenster_weg(self, fenster):
+        if getattr(self, "_aktuelles_neben_fenster", None) is fenster:
+            self._aktuelles_neben_fenster = None
 
     def _scan_laden_aus_pfad(self, pfad):
         ordner = Path(pfad)
@@ -1193,7 +1318,18 @@ class HauptFenster(QMainWindow):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
-        heatmap_main(str(self.aktueller_ordner))
+        bild = heatmap_main(str(self.aktueller_ordner))
+        if bild is None:
+            self.hinweis_label.setText("Keine markierten Scans für diesen Patienten gefunden.")
+            return
+        self._bild_zeigen(bild)
+
+        # Nav-Spalte neu aufbauen, damit der 2D-Knopf sofort auftaucht, und
+        # den Patienten wieder aufklappen - sonst ist man ploetzlich raus.
+        patient = Path(self.aktueller_ordner).parent.parent.name
+        self.baum_neu_aufbauen()
+        if patient in self._patient_aufklapp_widgets:
+            self._patient_toggle(self._patient_aufklapp_widgets[patient])
 
 
     #--- Genesungsverlauf ---

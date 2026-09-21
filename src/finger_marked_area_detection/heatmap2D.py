@@ -59,7 +59,7 @@ def heatmap_main(path: str):
     obj_dateien = finde_markierte_scans(patienten_ordner)
     if not obj_dateien:
         print("Keine markierten Scans fuer diesen Patienten gefunden.")
-        return
+        return None
 
     fig, ax = plt.subplots(figsize=(8, 10))
 
@@ -88,4 +88,7 @@ def heatmap_main(path: str):
     save_path = heatmap_ordner / "Genesungsverlauf.png"
     plt.savefig(save_path, dpi=150)
     print(f"Plot gespeichert unter: {save_path}")
-    plt.show()
+    # Kein plt.show(): das oeffnet ein blockierendes matplotlib-Fenster
+    # neben Qt. Angezeigt wird das gespeicherte Bild von der UI selbst.
+    plt.close(fig)
+    return save_path
