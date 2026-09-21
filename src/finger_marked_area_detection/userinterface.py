@@ -18,12 +18,16 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QScrollArea,
     QFrame,
-    QSizePolicy)
+    QSizePolicy,
+    QDialog,
+    QFileDialog,
+    QDialogButtonBox)
 from PySide6.QtCore import (
     QDir,
     Qt,
     QEvent,
-    QSize)
+    QSize,
+    QSettings)
 from pyvistaqt import QtInteractor
 
 from theme import QSS
@@ -129,6 +133,9 @@ class HauptFenster(QMainWindow):
         self.setWindowTitle("Fingerscan-Viewer")
         self.resize(1920, 1080)
         self.setAcceptDrops(True)
+
+        self.einstellungen = QSettings("UKR", "Fingerscan-Viewer")
+        self.root_ordner = self.einstellungen.value("root_ordner", "")
 
         self.aktueller_ordner = None
         self.isolieren_ablauf = None
@@ -256,6 +263,8 @@ class HauptFenster(QMainWindow):
         self.knopf_layout.addWidget(self.navigatecontainer)
         self.navigatecontainer.setVisible(False)
 
+        
+
         # --- Ordner-Browser (unten, 1/3 Hoehe) ---
         aussen_spalte = QWidget()
         aussen_layout = QVBoxLayout(aussen_spalte)
@@ -279,6 +288,15 @@ class HauptFenster(QMainWindow):
         aussen_layout.addWidget(self.ordner_browser_widget, stretch=1)
 
         haupt_layout.addWidget(aussen_spalte, stretch=1)
+
+        # --- Einstellungsknopf ---
+        self.button_einstellungen = QPushButton("⚙")
+        self.button_einstellungen.setObjectName("zahnrad_knopf") #fürs sylesheet
+        self.button_einstellungen.setFixedSize(40, 40)
+        self.button_einstellungen.setToolTip("Einstellungen")
+        self.button_einstellungen.clicked.connect(self.einstellungen_oeffnen)
+
+        aussen_layout.addWidget(self.button_einstellungen, alignment=Qt.AlignLeft)
 
         # --- Viewer ---
         self.viewer_spalte = QWidget()
@@ -341,6 +359,7 @@ class HauptFenster(QMainWindow):
         self.viewer_spalte.installEventFilter(self)
         self._positioniere_overlay_buttons()
 
+        self._root_ordner_anwenden()
     # ---------- kleine Bau-Helfer ----------
 
     def _knopf(self, text: str, funktion, ziel_layout, x = 192, y = 108) -> QPushButton:
@@ -368,7 +387,7 @@ class HauptFenster(QMainWindow):
             button.raise_()
             y += button.height() + rand 
 
-    # ---------- Drag & Drop / Laden ----------
+    # ---------- Drag & Drop / Laden / Einstellungen ----------
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -464,6 +483,56 @@ class HauptFenster(QMainWindow):
         self._pipette_aktiv = False
         self.plotter.interactor.removeEventFilter(self)
         self.plotter.interactor.unsetCursor()
+
+    def einstellungen_oeffnen(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Einstellungen")
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel("Root-Ordner (wird beim Start automatisch geöffnet):"))
+
+        # Eingabefeld, vorbelegt mit dem aktuellen Wert
+        pfad_zeile_layout = QHBoxLayout()
+        pfad_eingabe = QLineEdit(self.root_ordner)
+        button_durchsuchen = QPushButton("Files durchsuchen")
+        pfad_zeile_layout.addWidget(pfad_eingabe)
+        pfad_zeile_layout.addWidget(button_durchsuchen)
+        layout.addLayout(pfad_zeile_layout)
+
+        # öffnet  Ordner-Auswahldialog
+        def durchsuchen():
+            ordner = QFileDialog.getExistingDirectory(dialog, "Root-Ordner wählen", pfad_eingabe.text() or str(Path.home()))
+            if ordner:
+                pfad_eingabe.setText(ordner)
+        button_durchsuchen.clicked.connect(durchsuchen)
+
+        # OK / Abbrechen
+        knoepfe = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(knoepfe)
+        knoepfe.rejected.connect(dialog.reject)
+
+        def speichern():
+            eingabe = pfad_eingabe.text().strip()
+            p = Path(eingabe).expanduser()
+            if not p.is_dir():
+                self.hinweis_label.setText("Kein gültiger Ordner, Einstellung nicht gespeichert.")
+                return
+            self.root_ordner = str(p)
+            self.einstellungen.setValue("root_ordner", self.root_ordner)
+            self._root_ordner_anwenden()
+            dialog.accept()
+        knoepfe.accepted.connect(speichern)
+
+        dialog.exec()
+
+    def _root_ordner_anwenden(self):
+        if not self.root_ordner or not Path(self.root_ordner).is_dir():
+            return
+        
+        self.dateisystem_modell.setRootPath(self.root_ordner)
+        self.ordner_baum.setRootIndex(self.dateisystem_modell.index(self.root_ordner))
+        if hasattr(self, "pfad_eingabe"):
+            self.pfad_eingabe.setText(self.root_ordner)
 
     # ---------- Finger isolieren ----------
 

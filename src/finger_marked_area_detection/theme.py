@@ -37,6 +37,16 @@ QPushButton:pressed {
     border-color: #3A73AD;
 }
 
+QPushButton#zahnrad_knopf {
+    border: none;
+    background: transparent;
+    color: #555555;
+    font-size: 20px;
+}
+QPushButton#zahnrad_knopf:hover {
+    color: #333333;
+}
+
 QPushButton:disabled {
     background-color: #EDEFF2;
     color: #A0A6AE;
