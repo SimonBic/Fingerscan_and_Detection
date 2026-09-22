@@ -37,6 +37,25 @@ QPushButton#untersuchung_knopf {
     font-size: 10px;
 }
 
+/* Icon-Knoepfe (Hand, Finger, Stift, Lineal, 3D/2D): gleicher Rahmen und
+   Verlauf wie QPushButton, aber beim Hover nur ganz hell blau statt des
+   dunklen Blaus - das Icon soll erkennbar bleiben. */
+QToolButton#pikto_knopf {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #FFFFFF, stop:1 #EDF2F8);
+    border: 2px solid #4A90D9;
+    border-radius: 10px;
+    padding: 0px;
+}
+QToolButton#pikto_knopf:hover {
+    background: #E3F0FC;
+    border-color: #6AA8E8;
+}
+QToolButton#pikto_knopf:pressed {
+    background: #C9E1F7;
+    border-color: #3A73AD;
+}
+
 /* Das SVG ist der ganze Knopf - kein eigener Rahmen/Hintergrund */
 QToolButton#untersuchung_neu_knopf {
     border: none;
