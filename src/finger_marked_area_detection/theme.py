@@ -118,6 +118,48 @@ QLabel {
     font-size: 25px;
 }
 
+/* ---------- Title Screen ----------
+   Alles, was auf dem Netz-Hintergrund liegt, muss durchsichtig sein -
+   die allgemeine QWidget-Regel oben wuerde es sonst grau uebermalen. */
+QStackedWidget#titel_stapel,
+QWidget#titel_seite,
+QWidget#titel_inhalt,
+QWidget#titel_inhalt QLabel {
+    background: transparent;
+}
+QLabel#titel_schrift {
+    font-size: 40px;
+    font-weight: 600;
+    color: #1F2937;
+}
+QLabel#titel_root {
+    font-size: 12px;
+    color: #6B7280;
+}
+QPushButton#titel_knopf {
+    font-size: 16px;
+    padding: 0px;
+}
+
+QFrame#howto_karte {
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid #D8DEE6;
+    border-radius: 16px;
+}
+QFrame#howto_karte QLabel,
+QTextBrowser#howto_inhalt {
+    background: transparent;
+    border: none;
+}
+QTextBrowser#howto_inhalt {
+    font-size: 15px;
+    color: #1F2937;
+}
+QLabel#howto_titel {
+    font-size: 32px;
+    font-weight: 600;
+}
+
  QScrollBar:vertical {
     background: transparent;
     width: 14px;

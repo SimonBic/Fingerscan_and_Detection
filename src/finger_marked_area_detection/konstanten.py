@@ -4,6 +4,39 @@ from pathlib import Path
 # ---------- Pfade ----------
 
 ICON_ORDNER = Path(__file__).parent / "icons"
+LOGO_PFAD = ICON_ORDNER / "logo.png"
+
+# Tutorials fuer die How-To-Seite: Markdown, Bilder liegen im selben Ordner
+HOWTO_ORDNER = Path(__file__).parent / "howto"
+HOWTO_DATEI = HOWTO_ORDNER / "anleitung.md"
+
+
+# ---------- Gespeicherte Einstellungen (QSettings) ----------
+
+EINSTELLUNGEN_FIRMA = "UKR"
+EINSTELLUNGEN_APP = "Fingerscan-Viewer"
+ROOT_ORDNER_SCHLUESSEL = "root_ordner"
+
+
+# ---------- Title Screen ----------
+
+GOLDENER_SCHNITT = 0.382    # Logo-Mitte sitzt bei 38,2 % der Hoehe
+TITEL_LOGO_GROESSE = 180
+TITEL_KNOPF_BREITE = 360    # breit und flach
+TITEL_KNOPF_HOEHE = 44
+
+# Hintergrund-Netz: feste Verbindungen, die ganz langsam wabern
+# Kosten steigen mit der Zahl der Kanten (~ Punkte x Nachbarn). Python schafft
+# bei 1000 Punkten / 10 Nachbarn nur ~20 Bilder pro Sekunde - dann ruckelt es
+# und die Knoepfe reagieren traege.
+NETZ_PUNKTE = 500
+NETZ_NACHBARN = 4           # jeder Punkt wird mit so vielen naechsten Nachbarn verbunden
+NETZ_AMPLITUDE_PX = 20      # wie weit ein Punkt maximal aus seiner Ruhelage wandert
+NETZ_PERIODE_MIN_S = 25     # eine Hin-und-her-Bewegung dauert 25-45 s
+NETZ_PERIODE_MAX_S = 45
+NETZ_FPS = 20               # reicht: bei ~3 px/s sind das 0,15 px pro Bild, mehr sieht man nicht
+NETZ_FARBE = "#4A90D9"
+NETZ_HINTERGRUND = "#F5F7FA"
 
 
 # ---------- Knoepfe ----------

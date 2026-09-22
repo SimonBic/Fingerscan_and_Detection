@@ -55,6 +55,7 @@ from PySide6.QtCore import (
     )
 from PySide6.QtGui import (
     QIcon,
+    QCursor,
     QDesktopServices,
     QPixmap,
     QPainter,
@@ -112,6 +113,8 @@ from ui_unterklassen.untersuchungs_dialog import (
     UntersuchungDialog,
     op_bezug)
 from ui_unterklassen.blase import IconBlase
+from ui_unterklassen.titel_bildschirm import TitelBildschirm
+from ui_unterklassen.root_ordner_dialog import root_ordner_waehlen
 import konstanten as k
 
 
@@ -131,11 +134,15 @@ class HauptFenster(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Fingerscan-Viewer")
+        self.setWindowIcon(QIcon(str(k.LOGO_PFAD)))
         self.resize(1920, 1080)
-        self.setAcceptDrops(True)
+        # QMainWindow nimmt von sich aus Drops an. Auf dem Title Screen gibt es
+        # aber noch keinen Plotter, dropEvent wuerde ins Leere greifen -
+        # eingeschaltet wird es erst in _software_aufbauen
+        self.setAcceptDrops(False)
 
-        self.einstellungen = QSettings("UKR", "Fingerscan-Viewer")
-        self.root_ordner = self.einstellungen.value("root_ordner", "")
+        self.einstellungen = QSettings(k.EINSTELLUNGEN_FIRMA, k.EINSTELLUNGEN_APP)
+        self.root_ordner = self.einstellungen.value(k.ROOT_ORDNER_SCHLUESSEL, "")
 
         self.aktueller_ordner = None
         self.isolieren_ablauf = None
@@ -154,8 +161,48 @@ class HauptFenster(QMainWindow):
         self.genesungsverlauf_aktuell_rotiert = None
         self._genesungsverlauf_mesh_fuer_klick = None
 
+        # Zuerst der Title Screen im selben Fenster. Die eigentliche Oberflaeche
+        # (mit dem teuren VTK-Viewer) entsteht erst bei "Software starten" -
+        # so ist das Fenster sofort da.
+        self.titel_bildschirm = TitelBildschirm(self.root_ordner)
+        self.titel_bildschirm.software_starten.connect(self._software_starten)
+        self.titel_bildschirm.root_ordner_bearbeiten.connect(self._titel_root_ordner)
+        self.setCentralWidget(self.titel_bildschirm)
+
+    # ---------- Title Screen ----------
+
+    def _software_starten(self):
+        self.titel_bildschirm.zeige_laden()
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        QApplication.processEvents()      # "Wird gestartet ..." sichtbar machen
+        # Nicht direkt aufbauen: das ersetzt den Title Screen, und der wuerde
+        # geloescht, waehrend sein eigener Knopf-Klick noch laeuft
+        QTimer.singleShot(0, self._software_aufbauen_mit_cursor)
+
+    def _software_aufbauen_mit_cursor(self):
+        try:
+            self._software_aufbauen()
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _titel_root_ordner(self):
+        pfad = root_ordner_waehlen(self, self.root_ordner)
+        if pfad is None:
+            return
+        self.root_ordner = pfad
+        self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, pfad)
+        # Kein _root_ordner_anwenden(): die Nav-Spalte gibt es noch nicht, sie
+        # wird beim Start ohnehin aus self.root_ordner gebaut
+        self.titel_bildschirm.setze_root_ordner(pfad)
+
+    def _software_aufbauen(self):
+        # Erst jetzt: vorher gibt es keinen Plotter, auf den etwas fallen koennte
+        self.setAcceptDrops(True)
+
         zentral_widget = QWidget()
+        # Ersetzt den Title Screen - Qt loescht ihn dabei, sein Netz-Timer endet mit
         self.setCentralWidget(zentral_widget)
+        self.titel_bildschirm = None
         haupt_layout = QHBoxLayout(zentral_widget)
 
         self.knopf_spalte = QWidget()
@@ -504,45 +551,13 @@ class HauptFenster(QMainWindow):
         self.plotter.interactor.unsetCursor()
 
     def einstellungen_oeffnen(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Einstellungen")
-        layout = QVBoxLayout(dialog)
-
-        layout.addWidget(QLabel("Root-Ordner (wird beim Start automatisch geöffnet):"))
-
-        # Eingabefeld, vorbelegt mit dem aktuellen Wert
-        pfad_zeile_layout = QHBoxLayout()
-        pfad_eingabe = QLineEdit(self.root_ordner)
-        button_durchsuchen = QPushButton("Files durchsuchen")
-        pfad_zeile_layout.addWidget(pfad_eingabe)
-        pfad_zeile_layout.addWidget(button_durchsuchen)
-        layout.addLayout(pfad_zeile_layout)
-
-        # öffnet  Ordner-Auswahldialog
-        def durchsuchen():
-            ordner = QFileDialog.getExistingDirectory(dialog, "Root-Ordner wählen", pfad_eingabe.text() or str(Path.home()))
-            if ordner:
-                pfad_eingabe.setText(ordner)
-        button_durchsuchen.clicked.connect(durchsuchen)
-
-        # OK / Abbrechen
-        knoepfe = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        layout.addWidget(knoepfe)
-        knoepfe.rejected.connect(dialog.reject)
-
-        def speichern():
-            eingabe = pfad_eingabe.text().strip()
-            p = Path(eingabe).expanduser()
-            if not p.is_dir():
-                self.hinweis_label.setText("Kein gültiger Ordner, Einstellung nicht gespeichert.")
-                return
-            self.root_ordner = str(p)
-            self.einstellungen.setValue("root_ordner", self.root_ordner)
-            self._root_ordner_anwenden()
-            dialog.accept()
-        knoepfe.accepted.connect(speichern)
-
-        dialog.exec()
+        # Zahnrad in der laufenden Software - gleicher Dialog wie auf dem Title Screen
+        pfad = root_ordner_waehlen(self, self.root_ordner)
+        if pfad is None:
+            return
+        self.root_ordner = pfad
+        self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, pfad)
+        self._root_ordner_anwenden()
 
     def _root_ordner_anwenden(self):
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
