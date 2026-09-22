@@ -107,6 +107,15 @@ QTreeWidget::item:selected {
     color: black;
 }
 
+QCheckBox#anteil_checkbox {
+    font-size: 12px;
+    color: #1F2937;
+    spacing: 6px;
+}
+QCheckBox#anteil_checkbox:disabled {
+    color: #A0A6AE;
+}
+
 QPushButton:disabled {
     background-color: #EDEFF2;
     color: #A0A6AE;

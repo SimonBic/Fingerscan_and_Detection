@@ -103,12 +103,32 @@ def volumen_ab_fingerzwischenfalte(hand_mesh: p_v.PolyData) -> float:
     bounds = hand_mesh.bounds
     if bounds[4] > 0 or bounds[5] < 0:
         raise ValueError(
-            "Das Mesh scheint bei Z = 0 nicht die Fingerzwischenfalte zu haben"
+            "Das Mesh scheint bei Z = 0 nicht die Zwischenfingerfalte zu haben"
             "ist das ein isolierter, final ausgerichteter Finger?"
         )
  
     geschnitten = schneide_und_deckle(hand_mesh, normal=(0, 0, 1), origin=(0, 0, 0))
     return geschnitten.volume
+
+
+def flaeche_oberhalb_falte(mesh: p_v.PolyData) -> float:
+    #Flaecheninhalt des Teils oberhalb von Z = 0. Fuer den ganzen Finger ist
+    #das die Bezugsgroesse, fuer eine markierte Flaeche der Teil, der zu
+    #dieser Bezugsgroesse gehoert.
+    return float(mesh.clip(normal=(0, 0, 1), origin=(0, 0, 0), invert=False).area)
+
+
+def flaeche_ab_fingerzwischenfalte(hand_mesh: p_v.PolyData) -> float:
+    #Oberflaeche des Fingers oberhalb der Zwischenfingerfalte (Z = 0), die
+    #Bezugsgroesse, um eine markierte Flaeche in Prozent anzugeben.
+    bounds = hand_mesh.bounds
+    if bounds[4] > 0 or bounds[5] < 0:
+        raise ValueError(
+            "Das Mesh scheint bei Z = 0 nicht die Zwischenfingerfalte zu haben"
+            "ist das ein isolierter, final ausgerichteter Finger?"
+        )
+
+    return flaeche_oberhalb_falte(hand_mesh)
 
 
 def schliesse_offenes_ende(mesh: p_v.PolyData) -> p_v.PolyData:

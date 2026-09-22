@@ -154,3 +154,12 @@ ZIFFER_TIEFE = 0.4                 # mm Extrusion
 ZIFFER_UMKREIS_FAKTOR = 0.8        # halbe Diagonale, bezogen auf die Hoehe
 ZIFFER_LUFT = 0.1                  # mm Sicherheitsabstand
 ZIFFER_MIN_HOEHE = 1.0             # mm, kleiner wird die Ziffer nie
+
+# Checkbox beim Flaechen-Vermessen: Anteil der markierten Flaeche an der
+# Fingeroberflaeche ab der Zwischenfingerfalte
+ANTEIL_CHECKBOX_TEXT = "Anteil an der\nFingerfläche berechnen"
+ANTEIL_CHECKBOX_HILFE = ("Berechnet beim Speichern, wie viel Prozent der Fingerfläche "
+                         "ab der Zwischenfingerfalte markiert wurde, und schreibt es in "
+                         "die Excel-Liste.")
+ANTEIL_CHECKBOX_GESPERRT = ("Nur bei einem isolierten Finger möglich. Bei einem ganzen "
+                            "Hand-Scan gibt es keine Zwischenfingerfalte als Bezug.")

@@ -76,7 +76,7 @@ Auf "Bereich einzeichnen" klicken, dann mit Rechtsklick Punkte setzen und den Be
 
 Unter "Bereich / Strecke vermessen" können Strecken, Umfänge, Flächeninhalte sowie Volumina berechnet bzw. gemessen werden.
 
-- "Eingezeichnete Bereiche / Umfänge vermessen": Wie beim Einzeichnen von Bereichen mit Rechtsklick die gewünschten Bereiche umranden, beliebig viele. Dann auf "Messungen speichern" klicken und die Bereiche werden nach Umfang und Flächeninhalt gemessen und in einer .xlsx-Datei exportiert, welche im Fingerscan-Viewer sowie mit einem Tabellenprogramm Ihrer Wahl (z. B. Excel, LibreOffice Calc) betrachtet werden kann.
+- "Eingezeichnete Bereiche / Umfänge vermessen": Wie beim Einzeichnen von Bereichen mit Rechtsklick die gewünschten Bereiche umranden, beliebig viele. Dann auf "Messungen speichern" klicken und die Bereiche werden nach Umfang und Flächeninhalt gemessen und in einer .xlsx-Datei exportiert, welche im Fingerscan-Viewer sowie mit einem Tabellenprogramm Ihrer Wahl (z. B. Excel, LibreOffice Calc) betrachtet werden kann. Zusätzlich wird berechnet, welchen Anteil die markierten Flächen einzeln sowie gesamt an der Gesamtfläche des Fingers ab Höhe der Zwischenfingerfalte haben. Diese Daten werden ab jetzt zusätzlich in der .xlsx-Datei gespeichert. 
 
 - "Eingezeichnete Strecke vermessen": Hier kann der geodätische Pfad auf dem Scan (= tatsächliche Strecke auf dem Scan, nicht einfach die Luftlinie) vermessen werden. Einfach 2 Punkte rechtsklicken und der Wert kann oben abgelesen werden.
 

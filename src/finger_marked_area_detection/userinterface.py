@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QMenu,
     QToolButton,
+    QCheckBox,
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
@@ -75,6 +76,8 @@ from messungen import (
     volumen_ab_markierung,
     volumen_ab_ring, 
     volumen_ab_fingerzwischenfalte,
+    flaeche_ab_fingerzwischenfalte,
+    flaeche_oberhalb_falte,
     volumen_gesamtes_mesh)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
@@ -264,6 +267,12 @@ class HauptFenster(QMainWindow):
         vermessen_malen_layout = QVBoxLayout(self.vermessen_malen_container)
         self._knopf("Messung(en)\nspeichern", self.vermessungen_speichern_klick, vermessen_malen_layout)
         self._knopf("Letzte Fläche\nzurücknehmen", self.letzte_flaeche_zuruecknehmen, vermessen_malen_layout)
+        # Anteil an der Fingerflaeche - nur sinnvoll bei einem isolierten Finger,
+        # sonst waere der Bezugswert die halbe Hand
+        self.checkbox_anteil = QCheckBox(k.ANTEIL_CHECKBOX_TEXT)
+        self.checkbox_anteil.setObjectName("anteil_checkbox")
+        self.checkbox_anteil.setFixedWidth(k.KNOPF_BREITE)
+        vermessen_malen_layout.addWidget(self.checkbox_anteil)
         self.knopf_layout.addWidget(self.vermessen_malen_container)
         self.vermessen_malen_container.setVisible(False)
 
@@ -1462,11 +1471,36 @@ class HauptFenster(QMainWindow):
         self.zeige_basis_mesh_neu()
         self.vermessung_wahl_container.setVisible(False)
         self.vermessen_malen_container.setVisible(True)
+        self._anteil_checkbox_vorbereiten()
         self.hinweis_label.setText(
             "Fläche einzeichnen und Schleife schließen. Beliebig viele nacheinander.")
         draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status,
                   bei_flaeche_fertig=self.flaeche_fertig_gemalt)
         self.navigatecontainer.setVisible(True)
+
+    def _ist_isolierter_finger(self):
+        """Ist der geladene Scan ein isolierter Finger? Nur dann gibt es die
+        Zwischenfingerfalte bei Z = 0 als Bezug.
+
+        Entscheidend ist der Ordner: Ein ganzer Hand-Scan reicht ebenfalls ueber
+        Z = 0 hinweg, die Mesh-Ausdehnung allein wuerde ihn also durchwinken und
+        als Bezugsflaeche die halbe Hand liefern."""
+        if self.aktueller_ordner is None or self.aktuelles_hand_mesh is None:
+            return False
+        pfad = Path(self.aktueller_ordner)
+        ordner = pfad.parent if pfad.is_file() else pfad
+        if "_isoliert" not in ordner.name and ordner.parent.name != "isolierte_scans":
+            return False
+        # Zusaetzlich: ausgerichtet, also Falte bei Z = 0 und Finger darueber
+        bounds = self.aktuelles_hand_mesh.bounds
+        return bounds[4] <= 0 <= bounds[5]
+
+    def _anteil_checkbox_vorbereiten(self):
+        moeglich = self._ist_isolierter_finger()
+        self.checkbox_anteil.setEnabled(moeglich)
+        self.checkbox_anteil.setChecked(moeglich)
+        self.checkbox_anteil.setToolTip(
+            k.ANTEIL_CHECKBOX_HILFE if moeglich else k.ANTEIL_CHECKBOX_GESPERRT)
 
     # ---------- Mehrfach-Vermessung ----------
 
@@ -1531,18 +1565,44 @@ class HauptFenster(QMainWindow):
             self.hinweis_label.setText(f"Fehler: {e}")
             return
 
+        # Bezugsflaeche fuer den Prozentwert. Schlaegt das fehl, wird die Liste
+        # trotzdem geschrieben - der OBJ-Export ist schon durch, ein Abbruch
+        # wuerde nur die Messung kosten.
+        finger_flaeche = None
+        anteil_fehler = ""
+        if self.checkbox_anteil.isChecked():
+            try:
+                finger_flaeche = flaeche_ab_fingerzwischenfalte(self.aktuelles_hand_mesh)
+                # Nur der Teil einer Markierung, der ueber der Falte liegt, gehoert
+                # zur Bezugsflaeche - sonst koennte der Anteil ueber 100 % steigen
+                for messung in self.vermessungen:
+                    messung["flaeche_anteil_mm2"] = flaeche_oberhalb_falte(messung["flaeche"])
+            except Exception as e:
+                finger_flaeche = None
+                anteil_fehler = f"\nAnteil nicht berechenbar: {e}"
+
         ziel_ordner, ziel_name = vermessungs_ordner(scan_ordner)
         # Die Ergebnisliste liegt eine Ebene ueber dem Scan-Ordner, also
         # direkt in 'vermessene_scans'.
-        liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner.parent, ziel_name)
+        liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner.parent, ziel_name,
+                                             finger_flaeche_mm2=finger_flaeche)
+
+        if finger_flaeche:
+            gezaehlt = sum(m["flaeche_anteil_mm2"] for m in self.vermessungen)
+            gemalt = sum(m["flaeche_mm2"] for m in self.vermessungen)
+            anteil_text = f"\nMarkiert: {gezaehlt / finger_flaeche * 100:.1f} % der Fingerfläche ab Zwischenfingerfalte"
+            if gemalt - gezaehlt > 0.5:
+                anteil_text += f" ({gemalt - gezaehlt:.1f} mm² liegen darunter und zählen nicht mit)"
+        else:
+            anteil_text = anteil_fehler
 
         if liste_pfad is None:
             self.hinweis_label.setText(
-                f"Gespeichert unter {obj_pfad.parent}\n"
+                f"Gespeichert unter {obj_pfad.parent}{anteil_text}\n"
                 "Excel-Liste übersprungen - openpyxl ist nicht installiert.")
         else:
             self.hinweis_label.setText(
-                f"{len(self.vermessungen)} Messung(en) gespeichert\n"
+                f"{len(self.vermessungen)} Messung(en) gespeichert{anteil_text}\n"
                 f"Scan: {obj_pfad.parent}\n"
                 f"Liste: {liste_pfad}")
 

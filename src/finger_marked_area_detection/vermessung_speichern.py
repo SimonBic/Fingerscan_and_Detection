@@ -264,7 +264,14 @@ def speichere_vermessung(aktuelle_teile: list, hand_mesh: p_v.PolyData,
     return save_path
 
 
-def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str):
+def _anteil_flaeche(messung: dict) -> float:
+    """Der Teil einer Messung, der zur Bezugsflaeche gehoert, also oberhalb der
+    Zwischenfingerfalte liegt. Fehlt die Angabe, zaehlt die ganze Flaeche."""
+    return messung.get("flaeche_anteil_mm2", messung["flaeche_mm2"])
+
+
+def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str,
+                            finger_flaeche_mm2: float | None = None):
     """Schreibt die Messergebnisse als Excel-Liste in 'ziel_ordner'.
 
     Aufgerufen wird das mit 'vermessene_scans' selbst, nicht mit dem
@@ -272,7 +279,11 @@ def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str):
     nebeneinander, eine Ebene ueber den Scans.
 
     Gibt den Pfad zurueck - oder None, wenn openpyxl fehlt. Dann ist der
-    OBJ-Export trotzdem schon geschrieben und die App laeuft weiter."""
+    OBJ-Export trotzdem schon geschrieben und die App laeuft weiter.
+
+    'finger_flaeche_mm2' ist die Oberflaeche des Fingers ab der
+    Zwischenfingerfalte (siehe messungen.flaeche_ab_fingerzwischenfalte).
+    Wird sie uebergeben, kommt je Messung der Anteil in Prozent dazu."""
 
     try:
         from openpyxl import Workbook
@@ -292,8 +303,12 @@ def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str):
     blatt["A2"] = "Datum"
     blatt["B2"] = date.today().isoformat()
 
+    # Mit Bezugsflaeche kommt die Spalte "Anteil [%]" dazu
+    mit_anteil = bool(finger_flaeche_mm2)
+    spalten = ["Nr", "Flaeche [mm2]", "Umfang [mm]"] + (["Anteil [%]"] if mit_anteil else [])
+
     kopf_zeile = 4
-    for spalte, titel in enumerate(["Nr", "Flaeche [mm2]", "Umfang [mm]"], start=1):
+    for spalte, titel in enumerate(spalten, start=1):
         zelle = blatt.cell(row=kopf_zeile, column=spalte, value=titel)
         zelle.font = Font(bold=True)
 
@@ -302,15 +317,27 @@ def schreibe_ergebnis_liste(messungen: list, ziel_ordner: Path, ziel_name: str):
         blatt.cell(row=zeile, column=1, value=i)
         blatt.cell(row=zeile, column=2, value=round(messung["flaeche_mm2"], 1))
         blatt.cell(row=zeile, column=3, value=round(messung["umfang_mm"], 1))
+        if mit_anteil:
+            blatt.cell(row=zeile, column=4,
+                       value=round(_anteil_flaeche(messung) / finger_flaeche_mm2 * 100, 1))
 
+    flaeche_gesamt = sum(m["flaeche_mm2"] for m in messungen)
     summen_zeile = kopf_zeile + len(messungen) + 1
     blatt.cell(row=summen_zeile, column=1, value="Summe").font = Font(bold=True)
-    blatt.cell(row=summen_zeile, column=2,
-               value=round(sum(m["flaeche_mm2"] for m in messungen), 1)).font = Font(bold=True)
+    blatt.cell(row=summen_zeile, column=2, value=round(flaeche_gesamt, 1)).font = Font(bold=True)
     blatt.cell(row=summen_zeile, column=3,
                value=round(sum(m["umfang_mm"] for m in messungen), 1)).font = Font(bold=True)
+    if mit_anteil:
+        anteil_gesamt = sum(_anteil_flaeche(m) for m in messungen)
+        blatt.cell(row=summen_zeile, column=4,
+                   value=round(anteil_gesamt / finger_flaeche_mm2 * 100, 1)).font = Font(bold=True)
+        # Bezugsgroesse darunter, damit nachvollziehbar ist, worauf sich die Prozente beziehen
+        bezug_zeile = summen_zeile + 2
+        blatt.cell(row=bezug_zeile, column=1,
+                   value="Fingerflaeche ab Zwischenfingerfalte [mm2]").font = Font(bold=True)
+        blatt.cell(row=bezug_zeile, column=2, value=round(finger_flaeche_mm2, 1))
 
-    for spalte, breite in zip("ABC", (16, 16, 16)):
+    for spalte, breite in zip("ABCD", (42 if mit_anteil else 16, 16, 16, 16)):
         blatt.column_dimensions[spalte].width = breite
 
     mappe.save(str(pfad))
