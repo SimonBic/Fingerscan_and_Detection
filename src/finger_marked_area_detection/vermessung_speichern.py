@@ -20,32 +20,7 @@ import numpy as np
 import pyvista as p_v
 import trimesh
 from PIL import Image
-
-# Farbe der vermessenen Flaechen im gespeicherten Scan
-MESSUNG_FARBE = (220, 20, 20)      # rot
-ZAHL_FARBE = (255, 255, 255)       # weiss
-
-# Die Flaechen liegen exakt auf der Hand-Oberflaeche und wuerden mit ihr
-# um die Sichtbarkeit streiten (Z-Fighting). Deshalb werden sie entlang
-# ihrer Normalen leicht abgehoben - gleiches Mittel wie in heatmap3D.py.
-# Groesser = die Flaeche steht deutlicher ueber dem Scan und ist auch bei
-# starker Kruemmung und flachem Blickwinkel noch klar zu sehen. Nicht
-# beliebig erhoehen: in konkaven Stellen (Fingerzwischenraum) faltet sich
-# die Flaeche in sich selbst, sobald der Versatz an den dortigen
-# Kruemmungsradius heranreicht.
-FLAECHEN_VERSATZ = 1.0             # mm
-
-# Die Zahl muss immer UEBER der roten Flaeche liegen, darum an deren
-# Versatz gekoppelt - sonst versinkt sie, sobald oben geschraubt wird.
-ZAHL_ABSTAND_UEBER_FLAECHE = 0.3   # mm
-ZAHL_VERSATZ = FLAECHEN_VERSATZ + ZAHL_ABSTAND_UEBER_FLAECHE
-ZIFFER_TIEFE = 0.4                 # mm Extrusion
-
-# Fuer die Pruefung, ob die starre Ziffer in einer Hautfalte versinkt
-ZIFFER_UMKREIS_FAKTOR = 0.8        # halbe Diagonale, bezogen auf die Hoehe
-ZIFFER_LUFT = 0.1                  # mm Sicherheitsabstand
-ZIFFER_MIN_HOEHE = 1.0             # mm, kleiner wird die Ziffer nie
-
+import konstanten as k
 
 def _flaches_material(tmesh: trimesh.Trimesh, farbe_rgb: tuple) -> None:
     # Repo-weites Rezept fuer "einfarbig ohne Vertex-Farben": ein winziges
@@ -88,7 +63,7 @@ def aussen_normalen(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData) -> np.ndarra
 
 
 def hebe_flaeche_ab(flaeche: p_v.PolyData, hand_mesh: p_v.PolyData,
-                    versatz: float = FLAECHEN_VERSATZ) -> p_v.PolyData:
+                    versatz: float = k.FLAECHEN_VERSATZ) -> p_v.PolyData:
     """Schiebt die Flaeche entlang ihrer Normalen nach aussen, damit sie im
     gespeicherten Scan sichtbar ueber der Hand liegt.
 
@@ -130,7 +105,7 @@ def ziffer_hoehe(flaeche_mm2: float) -> float:
 
 def passende_ziffer_hoehe(hand_mesh: p_v.PolyData, position: np.ndarray,
                           normale: np.ndarray, wunsch_hoehe: float,
-                          versatz: float = ZAHL_VERSATZ) -> float:
+                          versatz: float = k.ZAHL_VERSATZ) -> float:
     """Verkleinert die Ziffer, wenn sie sonst in der Oberflaeche versinken
     wuerde.
 
@@ -155,7 +130,7 @@ def passende_ziffer_hoehe(hand_mesh: p_v.PolyData, position: np.ndarray,
     hoehe = wunsch_hoehe
     for _ in range(6):
         # halbe Diagonale der Ziffer: Breite liegt bei rund 1.2 x Hoehe
-        umkreis = hoehe * ZIFFER_UMKREIS_FAKTOR
+        umkreis = hoehe * k.ZIFFER_UMKREIS_FAKTOR
 
         # Nur die UMLIEGENDE Oberflaeche zaehlt. Die Begrenzung auf den
         # raeumlichen Abstand ist wichtig: sonst schlagen auch Punkte an,
@@ -163,14 +138,14 @@ def passende_ziffer_hoehe(hand_mesh: p_v.PolyData, position: np.ndarray,
         # Fingers), in der Projektion aber nah liegen.
         nachbarn = (in_ebene <= umkreis) & (abstand <= umkreis + versatz)
 
-        if not np.any(nachbarn) or anstieg[nachbarn].max() < versatz - ZIFFER_LUFT:
+        if not np.any(nachbarn) or anstieg[nachbarn].max() < versatz - k.ZIFFER_LUFT:
             break
 
         hoehe *= 0.75
 
     # Unter die Mindesthoehe nicht schrumpfen - eine Ziffer, die keiner mehr
     # lesen kann, nuetzt nichts, auch wenn sie dann frei steht.
-    return max(hoehe, ZIFFER_MIN_HOEHE)
+    return max(hoehe, k.ZIFFER_MIN_HOEHE)
 
 
 def zahl_auf_oberflaeche(
@@ -179,7 +154,7 @@ def zahl_auf_oberflaeche(
     normale: np.ndarray,
     hoch: np.ndarray,
     hoehe_mm: float,
-    versatz: float = ZAHL_VERSATZ,
+    versatz: float = k.ZAHL_VERSATZ,
 ) -> p_v.PolyData:
     """Baut eine 3D-Ziffer, die aufrecht und plan auf der Oberflaeche steht.
 
@@ -202,7 +177,7 @@ def zahl_auf_oberflaeche(
     matrix[:3, 2] = n
     matrix[:3, 3] = np.asarray(position, dtype=float) + n * versatz
 
-    ziffer = p_v.Text3D(text, depth=ZIFFER_TIEFE, height=hoehe_mm)
+    ziffer = p_v.Text3D(text, depth=k.ZIFFER_TIEFE, height=hoehe_mm)
     return ziffer.transform(matrix, inplace=False)
 
 
@@ -251,12 +226,12 @@ def speichere_vermessung(aktuelle_teile: list, hand_mesh: p_v.PolyData,
 
         rote_flaeche = _als_trimesh(hebe_flaeche_ab(flaeche, hand_mesh))
         rote_flaeche.remove_unreferenced_vertices()
-        _flaches_material(rote_flaeche, MESSUNG_FARBE)
+        _flaches_material(rote_flaeche, k.MESSUNG_FARBE)
         geometrien[f"vermessung_{nummer}"] = rote_flaeche
 
         ziffer = _als_trimesh(
             baue_zahl_fuer_messung(flaeche, hand_mesh, nummer, messung["flaeche_mm2"]))
-        _flaches_material(ziffer, ZAHL_FARBE)
+        _flaches_material(ziffer, k.ZAHL_FARBE)
         geometrien[f"vermessung_zahl_{nummer}"] = ziffer
 
     # 2) Die Hand selbst - mit ihrer echten Textur bzw. Vertex-Farben

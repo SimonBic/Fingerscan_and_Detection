@@ -105,298 +105,26 @@ from heatmap3D import (
     baue_farbgruppen_aus_gewinner,
     farb_prioritaet)
 from heatmap2D import heatmap_main
-
-# Hoehe des Hinweis-Labels ueber dem 3D-Viewer: mindestens eine Zeile,
-# hoechstens HINWEIS_MAX_ZEILEN - darueber hinaus wird gescrollt.
-KNOPF_BREITE = 192
-NAV_KNOPF_BREITE = 80   # Patient-Avatar und Untersuchungs-Knopf
-PIKTO_ICON = 24         # Icon im Piktogramm-Knopf - Luft fuer den 2px-Rand
-PIKTO_GROESSE = 34      # Typ-Piktogramme links neben der Untersuchung
-NEU_UNTERSUCHUNG_HOEHE = 36   # wie ein Untersuchungs-Knopf, passend zu add_Untersuchung.svg
-NAV_ABSTAND = 4         # zwischen Piktogramm und Knopf, und Rand der Nav-Spalte
-KNOPF_HOEHE = 108
-HINWEIS_MAX_ZEILEN = 3
-HINWEIS_RAND = 8
-ICON_ORDNER = Path(__file__).parent / "icons"
-
-class HinweisBereich(QScrollArea):
-    """Scroll-Bereich fuers Hinweis-Label, der genau so hoch wird wie sein
-    Inhalt - mindestens eine, hoechstens HINWEIS_MAX_ZEILEN Zeilen.
-
-    Noetig, weil QScrollArea seinen sizeHint NICHT vom eingesetzten Widget
-    ableitet: ohne diese Ueberschreibung waere der Bereich immer so hoch
-    wie erlaubt, also auch bei einer einzigen Zeile drei Zeilen hoch."""
-
-    def _gewuenschte_hoehe(self) -> int:
-        hinweis = self.widget()
-        if hinweis is None:
-            return super().sizeHint().height()
-
-        zeilen_hoehe = hinweis.fontMetrics().lineSpacing()
-        noetige_hoehe = hinweis.sizeHint().height()
-        hoehe = min(max(noetige_hoehe, zeilen_hoehe), zeilen_hoehe * HINWEIS_MAX_ZEILEN)
-
-        return hoehe + HINWEIS_RAND
-
-    def sizeHint(self) -> QSize:
-        return QSize(super().sizeHint().width(), self._gewuenschte_hoehe())
-
-    def minimumSizeHint(self) -> QSize:
-        # Muss ebenfalls ueberschrieben werden: QAbstractScrollArea meldet
-        # sonst eine Mindesthoehe aus Rahmen und Scrollbar-Breite, die
-        # groesser als eine Textzeile ist und den sizeHint aushebelt.
-        return QSize(super().minimumSizeHint().width(), self._gewuenschte_hoehe())
-
-
-class HinweisLabel(QLabel):
-    """QLabel, das seinen HinweisBereich nach jeder Textaenderung neu
-    vermessen laesst. Ohne das bliebe der Bereich auf der Hoehe stehen,
-    die er beim ersten Anzeigen hatte - QLabel.setText() loest von sich
-    aus keine Neuberechnung im umgebenden Layout aus."""
-
-    def setText(self, text: str) -> None:
-        super().setText(text)
-        self.updateGeometry()
-
-        bereich = self.parentWidget()
-        while bereich is not None and not isinstance(bereich, HinweisBereich):
-            bereich = bereich.parentWidget()
-
-        if bereich is not None:
-            bereich.updateGeometry()
-            bereich.verticalScrollBar().setValue(0)   # neue Meldung von oben zeigen
-
-
-# Angaben zu einer Untersuchung (Nummer, Zeit nach OP) liegen als kleine
-# JSON-Datei im Original-Scan-Ordner - so wandern sie mit, wenn der Ordner
-# verschoben wird.
-UNTERSUCHUNG_DATEI = "untersuchung.json"
-ZEIT_EINHEITEN = {             # gespeichert  -> (Einzahl, Mehrzahl, Kuerzel fuer Ordnernamen)
-    "Tage":   ("Tag",   "Tage",   "T"),
-    "Wochen": ("Woche", "Wochen", "W"),
-    "Monate": ("Monat", "Monate", "M"),
-    "Jahre":  ("Jahr",  "Jahre",  "J"),
-}
-# gespeichert -> (Anzeige im Dialog, Anzeige auf dem Knopf, Endung im Ordnernamen).
-# Im Ordnernamen ohne Umlaut, damit er auch auf Netzlaufwerken/in ZIPs heil bleibt.
-OP_BEZUG = {
-    "postOP": ("nach OP", "postOP", "postOP"),
-    "praeOP": ("vor OP",  "präOP",  "praeOP"),
-}
-
-
-def op_bezug(meta):
-    # Angaben ohne 'bezug' stammen aus der Zeit, als es nur post-OP gab
-    bezug = (meta or {}).get("bezug", "postOP")
-    return bezug if bezug in OP_BEZUG else "postOP"
+from ui_unterklassen.hinweis_label import (
+    HinweisLabel,
+    HinweisBereich)
+from ui_unterklassen.untersuchungs_dialog import (
+    UntersuchungDialog,
+    op_bezug)
+from ui_unterklassen.blase import IconBlase
+import konstanten as k
 
 
 def zeit_text(meta):
     """'6 Wochen', '1 Monat' - oder None, wenn keine Angabe."""
-    if not meta or "wert" not in meta or meta.get("einheit") not in ZEIT_EINHEITEN:
+    if not meta or "wert" not in meta or meta.get("einheit") not in k.ZEIT_EINHEITEN:
         return None
-    einzahl, mehrzahl, _ = ZEIT_EINHEITEN[meta["einheit"]]
+    einzahl, mehrzahl, _ = k.ZEIT_EINHEITEN[meta["einheit"]]
     return f"{meta['wert']} {einzahl if meta['wert'] == 1 else mehrzahl}"
 
 
-class UntersuchungDialog(QDialog):
-    """Fragt Nummer der Untersuchung und Zeit nach der OP ab - beim Hinzufuegen
-    eines Scans zusaetzlich den Ordnernamen.
-
-    'pruefen' ist eine Funktion (nummer, ordnername) -> Fehlertext oder None.
-    Bei einem Fehler bleibt der Dialog offen, damit nichts neu eingegeben
-    werden muss."""
-
-    def __init__(self, eltern, titel, meta, pruefen, ordnername=None):
-        super().__init__(eltern)
-        self.setWindowTitle(titel)
-        self._pruefen = pruefen
-        form = QFormLayout(self)
-
-        self.nummer = QSpinBox()
-        self.nummer.setRange(1, 99)
-        self.nummer.setValue(meta.get("nummer", 1))
-        form.addRow("Untersuchung Nr.:", self.nummer)
-
-        zeit_zeile = QHBoxLayout()
-        self.wert = QSpinBox()
-        self.wert.setRange(0, 999)
-        self.wert.setValue(meta.get("wert", 0))
-        self.einheit = QComboBox()
-        self.einheit.addItems(list(ZEIT_EINHEITEN))
-        self.einheit.setCurrentText(meta.get("einheit", "Wochen"))
-        self.bezug = QComboBox()
-        for schluessel, (text, _, _) in OP_BEZUG.items():
-            self.bezug.addItem(text, schluessel)
-        self.bezug.setCurrentIndex(self.bezug.findData(op_bezug(meta)))
-        zeit_zeile.addWidget(self.wert)
-        zeit_zeile.addWidget(self.einheit)
-        zeit_zeile.addWidget(self.bezug)
-        form.addRow("Zeitpunkt:", zeit_zeile)
-
-        # Ordnername nur beim Hinzufuegen. Er folgt den Angaben oben, bis man
-        # ihn selbst aendert - danach bleibt er, wie man ihn geschrieben hat.
-        self.ordnername = None
-        if ordnername is not None:
-            self.ordnername = QLineEdit(ordnername)
-            self._ordnername_von_hand = False
-            self.ordnername.textEdited.connect(lambda _: setattr(self, "_ordnername_von_hand", True))
-            for signal in (self.nummer.valueChanged, self.wert.valueChanged,
-                           self.einheit.currentTextChanged, self.bezug.currentIndexChanged):
-                signal.connect(self._ordnername_nachziehen)
-            self._ordnername_nachziehen()
-            form.addRow("Ordnername:", self.ordnername)
-
-        knoepfe = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        knoepfe.accepted.connect(self.accept)
-        knoepfe.rejected.connect(self.reject)
-        form.addRow(knoepfe)
-
-        # Die Beschriftungen haben sonst die 25px aus dem globalen QLabel-Stil
-        for label in self.findChildren(QLabel):
-            label.setStyleSheet("font-size: 14px;")
-
-    def _ordnername_nachziehen(self):
-        if self._ordnername_von_hand:
-            return
-        kuerzel = ZEIT_EINHEITEN[self.einheit.currentText()][2]
-        endung = OP_BEZUG[self.bezug.currentData()][2]
-        self.ordnername.setText(f"U{self.nummer.value()}_{self.wert.value()}{kuerzel}_{endung}")
-
-    def meta(self):
-        return {"nummer": self.nummer.value(), "wert": self.wert.value(),
-                "einheit": self.einheit.currentText(), "bezug": self.bezug.currentData()}
-
-    def ordner(self):
-        return self.ordnername.text().strip() if self.ordnername is not None else None
-
-    def accept(self):
-        fehler = self._pruefen(self.nummer.value(), self.ordner())
-        if fehler:
-            QMessageBox.warning(self, self.windowTitle(), fehler)
-            return
-        super().accept()
 
 
-class _BlasenFlaeche(QWidget):
-    """Malt die Sprechblase: abgerundetes Rechteck, rechts davon ein Strich
-    hinueber zum Untersuchungs-Knopf."""
-
-    def __init__(self, strich_y, eltern=None):
-        super().__init__(eltern)
-        self._strich_y = strich_y
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        stift = QPen(QColor(IconBlase.RANDFARBE), 2)
-        # 1px nach innen, damit der 2px-Rand nicht am Widgetrand abgeschnitten wird
-        koerper = QRectF(1, 1, self.width() - IconBlase.VERBINDUNG - 2, self.height() - 2)
-
-        # Strich zuerst: sein Anfang verschwindet so unter dem Blasenrand
-        p.setPen(stift)
-        p.drawLine(QPointF(koerper.right(), self._strich_y), QPointF(self.width(), self._strich_y))
-
-        p.setBrush(QColor("#FFFFFF"))
-        p.drawRoundedRect(koerper, IconBlase.RADIUS, IconBlase.RADIUS)
-
-
-class IconBlase(QWidget):
-    """Sprechblase mit den Scan-Icons einer Untersuchung. Ploppt links neben
-    dem Untersuchungs-Knopf auf, ohne das Layout darunter zu verschieben.
-
-    Ein eigenes Popup-Fenster, weil sie ueber den Rand der Nav-Spalte in den
-    Viewer ragt - und der VTK-Viewer ein natives OpenGL-Fenster ist, das
-    normale Qt-Widgets immer uebermalt. Als Qt.Popup schliesst sie sich von
-    selbst bei einem Klick daneben oder mit Esc."""
-
-    RAND = 12            # Platz rundum fuer den Schatten
-    POLSTER = 6          # Innenabstand Blase -> Icons
-    VERBINDUNG = 8       # Laenge des Strichs von der Blase zum Knopf
-    RADIUS = 12
-    RANDFARBE = "#C9D0D8"   # hellgrau - die Blase soll sich nicht vor die Knoepfe draengen
-    DAUER_MS = 220
-
-    geschlossen = Signal()
-
-    def __init__(self, anker, knoepfe):
-        super().__init__(anker, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        self._anker = anker
-        self._bild = None
-        self._t = 1.0
-
-        # Strich auf Hoehe der Knopfmitte; die erste Icon-Reihe beginnt auf
-        # Hoehe der Knopf-Oberkante
-        self._flaeche = _BlasenFlaeche(self.POLSTER + anker.height() / 2, self)
-        layout = QVBoxLayout(self._flaeche)
-        layout.setContentsMargins(self.POLSTER, self.POLSTER, self.POLSTER + self.VERBINDUNG, self.POLSTER)
-        layout.setSpacing(NAV_ABSTAND)
-        for knopf in knoepfe:
-            layout.addWidget(knopf)
-
-        schatten = QGraphicsDropShadowEffect(self._flaeche)
-        schatten.setBlurRadius(14)
-        schatten.setOffset(0, 2)
-        schatten.setColor(QColor(0, 0, 0, 55))
-        self._flaeche.setGraphicsEffect(schatten)
-
-        self._flaeche.adjustSize()
-        self._flaeche.move(self.RAND, self.RAND)
-        self.resize(self._flaeche.width() + 2 * self.RAND, self._flaeche.height() + 2 * self.RAND)
-
-        self._animation = QVariantAnimation(self)
-        self._animation.setStartValue(0.0)
-        self._animation.setEndValue(1.0)
-        self._animation.setDuration(self.DAUER_MS)
-        self._animation.valueChanged.connect(self._schritt)
-        self._animation.finished.connect(self._fertig)
-
-    def zeigen(self):
-        # Strich endet genau an der linken Kante des Knopfs
-        oben_links = self._anker.mapToGlobal(QPoint(0, 0))
-        self.move(oben_links.x() - self._flaeche.width() - self.RAND,
-                  oben_links.y() - self.POLSTER - self.RAND)
-
-        # Fuer das Aufploppen wird ein Standbild skaliert: echte Widgets
-        # lassen sich nicht stufenlos skalieren. Am Ende uebernehmen wieder
-        # die echten Knoepfe (Hover, Klick).
-        self._bild = self.grab()
-        self._flaeche.hide()
-        self._t = 0.0
-        self.show()
-        self._animation.start()
-
-    def _schritt(self, t):
-        self._t = t
-        self.update()
-
-    def _fertig(self):
-        self._bild = None
-        self._flaeche.show()
-        self.update()
-
-    def paintEvent(self, event):
-        if self._bild is None:
-            return
-        # Aus dem Strichende am Knopf heraus: leicht ueber das Ziel hinaus (OutBack) und
-        # zurueck - das ist das "Plopp". Dazu ein schnelles Einblenden.
-        groesse = 0.55 + 0.45 * QEasingCurve(QEasingCurve.OutBack).valueForProgress(self._t)
-        deckkraft = QEasingCurve(QEasingCurve.OutCubic).valueForProgress(min(1.0, self._t * 1.6))
-        spitze = QPointF(self.RAND + self._flaeche.width(),
-                         self.RAND + self.POLSTER + self._anker.height() / 2)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.setOpacity(deckkraft)
-        p.translate(spitze)
-        p.scale(groesse, groesse)
-        p.translate(-spitze)
-        p.drawPixmap(0, 0, self._bild)
-
-    def hideEvent(self, event):
-        self.geschlossen.emit()
-        super().hideEvent(event)
 
 
 class HauptFenster(QMainWindow):
@@ -550,23 +278,15 @@ class HauptFenster(QMainWindow):
         # sonst schiebt sie sich bei vielen Patienten ueber die Avatare.
         self.nav_spalte.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.nav_spalte.verticalScrollBar().ensurePolished()
-        inhalt_breite = NAV_ABSTAND + PIKTO_GROESSE + NAV_ABSTAND + NAV_KNOPF_BREITE + NAV_ABSTAND
+        inhalt_breite = k.NAV_ABSTAND + k.PIKTO_GROESSE + k.NAV_ABSTAND + k.NAV_KNOPF_BREITE + k.NAV_ABSTAND
         self.nav_spalte.setFixedWidth(inhalt_breite + self.nav_spalte.verticalScrollBar().sizeHint().width())
 
         self.nav_inhalt = QWidget()
         self.nav_layout = QVBoxLayout(self.nav_inhalt)
         self.nav_layout.setAlignment(Qt.AlignTop)
-        self.nav_layout.setContentsMargins(NAV_ABSTAND, NAV_ABSTAND, NAV_ABSTAND, NAV_ABSTAND)
+        self.nav_layout.setContentsMargins(k.NAV_ABSTAND, k.NAV_ABSTAND, k.NAV_ABSTAND, k.NAV_ABSTAND)
         self.nav_layout.setSpacing(6)
         self.nav_spalte.setWidget(self.nav_inhalt)
-
-        # Einstellungsknopf oben in die Spalte
-        self.button_einstellungen = QToolButton()
-        self.button_einstellungen.setObjectName("zahnrad_knopf")
-        self.button_einstellungen.setText("⚙")
-        self.button_einstellungen.setToolTip("Einstellungen")
-        self.button_einstellungen.clicked.connect(self.einstellungen_oeffnen)
-        self.nav_layout.addWidget(self.button_einstellungen, alignment=Qt.AlignRight)
 
         # Zustand fürs Akkordeon
         self._offener_patient = None
@@ -598,9 +318,29 @@ class HauptFenster(QMainWindow):
         self.hinweis_bereich.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         zeilen_hoehe = self.hinweis_label.fontMetrics().lineSpacing()
-        self.hinweis_bereich.setMinimumHeight(zeilen_hoehe + HINWEIS_RAND)
-        self.hinweis_bereich.setMaximumHeight(zeilen_hoehe * HINWEIS_MAX_ZEILEN + HINWEIS_RAND)
-        viewer_layout.addWidget(self.hinweis_bereich)
+        self.hinweis_bereich.setMinimumHeight(zeilen_hoehe + k.HINWEIS_RAND)
+        self.hinweis_bereich.setMaximumHeight(zeilen_hoehe * k.HINWEIS_MAX_ZEILEN + k.HINWEIS_RAND)
+
+        # Einstellungsknopf oben rechts neben dem Hinweistext
+        self.button_einstellungen = QToolButton()
+        self.button_einstellungen.setObjectName("zahnrad_knopf")
+        self.button_einstellungen.setText("⚙")
+        self.button_einstellungen.setToolTip("Einstellungen")
+        # So hoch wie die erste Textzeile: dann sitzt das Zahnrad auf Hoehe
+        # des Textes, auch wenn der Hinweis mehrzeilig wird
+        self.button_einstellungen.setFixedSize(k.ZAHNRAD_BREITE, zeilen_hoehe + k.HINWEIS_RAND)
+        self.button_einstellungen.clicked.connect(self.einstellungen_oeffnen)
+
+        kopf_zeile = QHBoxLayout()
+        kopf_zeile.setContentsMargins(0, 0, 0, 0)
+        # Links gleich viel Platz wie das Zahnrad rechts - sonst steht der
+        # zentrierte Hinweistext nicht mehr ueber der Mitte des Viewers
+        kopf_zeile.addSpacing(k.ZAHNRAD_BREITE)
+        kopf_zeile.addWidget(self.hinweis_bereich, stretch=1)
+        # Oben ausrichten: der Hinweis kann bis zu drei Zeilen hoch werden,
+        # das Zahnrad soll trotzdem in der Ecke bleiben
+        kopf_zeile.addWidget(self.button_einstellungen, alignment=Qt.AlignTop)
+        viewer_layout.addLayout(kopf_zeile)
 
         self.plotter = QtInteractor(self.viewer_spalte)
         self.plotter.set_background("F5F7FA")
@@ -653,7 +393,7 @@ class HauptFenster(QMainWindow):
         self.baum_neu_aufbauen()
     # ---------- kleine Bau-Helfer ----------
 
-    def _knopf(self, text: str, funktion, ziel_layout, x = KNOPF_BREITE, y = KNOPF_HOEHE) -> QPushButton:
+    def _knopf(self, text: str, funktion, ziel_layout, x = k.KNOPF_BREITE, y = k.KNOPF_HOEHE) -> QPushButton:
         button = QPushButton(text)
         button.setFixedSize(x, y)
         button.clicked.connect(funktion)
@@ -809,7 +549,6 @@ class HauptFenster(QMainWindow):
             return
         self.baum_neu_aufbauen()
 
-    TYP_ORDNER = ["originale_scans", "isolierte_scans", "markierte_scans", "vermessene_scans"]
 
     def _scan_analysieren(self, scan_name):
         # Vermessen wird auf einem beliebigen Scan (original, isoliert,
@@ -829,9 +568,9 @@ class HauptFenster(QMainWindow):
     def baum_neu_aufbauen(self):
         #Baut die Navigations-Spalte: Patienten als Avatar-Knoepfe,
         #darunter aufklappbar die Untersuchungen, darunter die Typ-Piktogramme.
-        # Alte Patienten-Widgets entfernen (Einstellungsknopf behalten)
-        while self.nav_layout.count() > 1:
-            item = self.nav_layout.takeAt(1)
+        # Alte Patienten-Widgets entfernen
+        while self.nav_layout.count() > 0:
+            item = self.nav_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
@@ -854,7 +593,7 @@ class HauptFenster(QMainWindow):
             self._angezeigte_signaturen[patient_ordner.resolve()] = self._patient_signatur(patient_ordner)
             struktur = self._untersuchungen_sammeln(patient_ordner)
             
-            if not struktur and not any((patient_ordner / t).is_dir() for t in self.TYP_ORDNER):
+            if not struktur and not any((patient_ordner / t).is_dir() for t in k.TYP_ORDNER):
                 continue
             self._patient_block_bauen(patient_ordner, struktur)
 
@@ -943,9 +682,9 @@ class HauptFenster(QMainWindow):
         knopf = QToolButton()
         knopf.setObjectName("patient_knopf")
         knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        knopf.setFixedSize(NAV_KNOPF_BREITE, NAV_KNOPF_BREITE)
+        knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NAV_KNOPF_BREITE)
         knopf.setIconSize(QSize(44, 44))
-        knopf.setIcon(QIcon(str(ICON_ORDNER / "add_patient.svg")))
+        knopf.setIcon(QIcon(str(k.ICON_ORDNER / "add_patient.svg")))
         knopf.setText("Neu")
         knopf.setToolTip("Neuen Patienten anlegen")
         knopf.clicked.connect(self.neuer_patient_klick)
@@ -955,7 +694,7 @@ class HauptFenster(QMainWindow):
         z_layout.setContentsMargins(0, 0, 0, 0)
         z_layout.setSpacing(0)
         # Platz der Patienten-Piktogramme freihalten -> buendig mit den Avataren
-        z_layout.addSpacing(PIKTO_GROESSE + NAV_ABSTAND)
+        z_layout.addSpacing(k.PIKTO_GROESSE + k.NAV_ABSTAND)
         z_layout.addWidget(knopf)
         self.nav_layout.addWidget(zeile, alignment=Qt.AlignLeft)
 
@@ -977,7 +716,7 @@ class HauptFenster(QMainWindow):
             patient_ordner.mkdir()
             # Die Scan-Typ-Ordner gleich mit anlegen: daran erkennt die
             # Nav-Spalte einen Patientenordner, auch solange er leer ist.
-            for typ in self.TYP_ORDNER:
+            for typ in k.TYP_ORDNER:
                 (patient_ordner / typ).mkdir()
         except OSError as e:
             QMessageBox.warning(self, "Neuer Patient", f"Ordner konnte nicht angelegt werden:\n{e}")
@@ -1007,7 +746,6 @@ class HauptFenster(QMainWindow):
 
     # ---------- Neuen Scan hinzufuegen ----------
 
-    BILD_ENDUNGEN = (".png", ".jpg", ".jpeg")
 
     def neuer_scan_klick(self, patient_ordner):
         dateien, _ = QFileDialog.getOpenFileNames(
@@ -1060,7 +798,7 @@ class HauptFenster(QMainWindow):
         
         objs = [d for d in dateien if d.suffix.lower() == ".obj"]
         mtls = [d for d in dateien if d.suffix.lower() == ".mtl"]
-        bilder = [d for d in dateien if d.suffix.lower() in cls.BILD_ENDUNGEN]
+        bilder = [d for d in dateien if d.suffix.lower() in k.BILD_ENDUNGEN]
         fehler = []
 
         if not objs:
@@ -1118,7 +856,7 @@ class HauptFenster(QMainWindow):
     def _untersuchungen_sammeln(self, patient_ordner):
         #{untersuchung_basis: {typ_label: pfad}}, lexikografisch nach Basis."""
         untersuchungen = defaultdict(dict)
-        for typ in self.TYP_ORDNER:
+        for typ in k.TYP_ORDNER:
             typ_pfad = patient_ordner / typ
             if not typ_pfad.is_dir():
                 continue
@@ -1141,7 +879,7 @@ class HauptFenster(QMainWindow):
     @classmethod
     def _untersuchung_meta(cls, typen):
         for ordner in [cls._meta_ordner(typen), *map(Path, typen.values())]:
-            datei = ordner / UNTERSUCHUNG_DATEI
+            datei = ordner / k.UNTERSUCHUNG_DATEI
             if datei.is_file():
                 try:
                     return json.loads(datei.read_text(encoding="utf-8"))
@@ -1151,7 +889,7 @@ class HauptFenster(QMainWindow):
 
     @staticmethod
     def _meta_schreiben(ordner, meta):
-        (Path(ordner) / UNTERSUCHUNG_DATEI).write_text(
+        (Path(ordner) / k.UNTERSUCHUNG_DATEI).write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _nummer_pruefen(self, patient_ordner, nummer, ausser_basis=None):
@@ -1167,9 +905,9 @@ class HauptFenster(QMainWindow):
         # Avatar-Knopf
         patient_knopf = QToolButton()
         patient_knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        patient_knopf.setFixedSize(NAV_KNOPF_BREITE, NAV_KNOPF_BREITE)
+        patient_knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NAV_KNOPF_BREITE)
         patient_knopf.setIconSize(QSize(44, 44))
-        patient_knopf.setIcon(QIcon(str(ICON_ORDNER / "person.svg")))
+        patient_knopf.setIcon(QIcon(str(k.ICON_ORDNER / "person.svg")))
         patient_knopf.setText(patient_name)
         patient_knopf.setObjectName("patient_knopf")
 
@@ -1177,20 +915,20 @@ class HauptFenster(QMainWindow):
         patient_zeile = QWidget()
         pz_layout = QHBoxLayout(patient_zeile)
         pz_layout.setContentsMargins(0, 0, 0, 0)
-        pz_layout.setSpacing(NAV_ABSTAND)
+        pz_layout.setSpacing(k.NAV_ABSTAND)
 
         # Senkrechte Spalte fuer alles, was den ganzen Patienten betrifft
         # (3D-Verlauf, 2D-Heatmap). Zwei Knoepfe passen neben den Avatar.
         patient_piktos = QWidget()
-        patient_piktos.setFixedWidth(PIKTO_GROESSE)
+        patient_piktos.setFixedWidth(k.PIKTO_GROESSE)
         pp_layout = QVBoxLayout(patient_piktos)
         pp_layout.setContentsMargins(0, 0, 0, 0)
-        pp_layout.setSpacing(NAV_ABSTAND)
+        pp_layout.setSpacing(k.NAV_ABSTAND)
         pp_layout.setAlignment(Qt.AlignTop)
 
-        patient_knoepfe = [k for k in (self._genesungsverlauf_knopf_bauen(patient_ordner), self._heatmap_2d_knopf_bauen(patient_ordner)) if k is not None]
-        for k in patient_knoepfe:
-            pp_layout.addWidget(k)
+        patient_knoepfe = [knopf for knopf in (self._genesungsverlauf_knopf_bauen(patient_ordner), self._heatmap_2d_knopf_bauen(patient_ordner)) if knopf is not None]
+        for knopf in patient_knoepfe:
+            pp_layout.addWidget(knopf)
 
         pz_layout.addWidget(patient_piktos)
         pz_layout.addWidget(patient_knopf)
@@ -1201,11 +939,11 @@ class HauptFenster(QMainWindow):
         untersuchungen_container = QWidget()
         uc_layout = QGridLayout(untersuchungen_container)
         uc_layout.setContentsMargins(0, 0, 0, 0)
-        uc_layout.setHorizontalSpacing(NAV_ABSTAND)
+        uc_layout.setHorizontalSpacing(k.NAV_ABSTAND)
         uc_layout.setVerticalSpacing(3)
         # Spalte 0 behaelt ihre Breite auch wenn die Piktogramme versteckt
         # sind - sonst springt der Untersuchungs-Knopf beim Aufklappen zur Seite.
-        uc_layout.setColumnMinimumWidth(0, PIKTO_GROESSE)
+        uc_layout.setColumnMinimumWidth(0, k.PIKTO_GROESSE)
         untersuchungen_container.setVisible(False)
         self.nav_layout.addWidget(untersuchungen_container, alignment=Qt.AlignLeft)
 
@@ -1216,9 +954,9 @@ class HauptFenster(QMainWindow):
         # Unter der letzten Untersuchung: neuen Scan hinzufuegen
         neu_knopf = QToolButton()
         neu_knopf.setObjectName("untersuchung_neu_knopf")
-        neu_knopf.setFixedSize(NAV_KNOPF_BREITE, NEU_UNTERSUCHUNG_HOEHE)
-        neu_knopf.setIconSize(QSize(NAV_KNOPF_BREITE, NEU_UNTERSUCHUNG_HOEHE))
-        neu_knopf.setIcon(QIcon(str(ICON_ORDNER / "add_Untersuchung.svg")))
+        neu_knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NEU_UNTERSUCHUNG_HOEHE)
+        neu_knopf.setIconSize(QSize(k.NAV_KNOPF_BREITE, k.NEU_UNTERSUCHUNG_HOEHE))
+        neu_knopf.setIcon(QIcon(str(k.ICON_ORDNER / "add_Untersuchung.svg")))
         neu_knopf.setToolTip("Neuen Scan hinzufügen")
         neu_knopf.clicked.connect(lambda _, po=patient_ordner: self.neuer_scan_klick(po))
         uc_layout.addWidget(neu_knopf, len(struktur), 1, alignment=Qt.AlignTop)
@@ -1263,9 +1001,9 @@ class HauptFenster(QMainWindow):
     def _patient_pikto(self, icon_datei, tooltip, slot):
         knopf = QToolButton()
         knopf.setObjectName("pikto_knopf")
-        knopf.setIconSize(QSize(PIKTO_ICON, PIKTO_ICON))
-        knopf.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
-        knopf.setIcon(QIcon(str(ICON_ORDNER / icon_datei)))
+        knopf.setIconSize(QSize(k.PIKTO_ICON, k.PIKTO_ICON))
+        knopf.setFixedSize(k.PIKTO_GROESSE, k.PIKTO_GROESSE)
+        knopf.setIcon(QIcon(str(k.ICON_ORDNER / icon_datei)))
         knopf.setToolTip(tooltip)
         knopf.clicked.connect(slot)
         knopf.setVisible(False)
@@ -1280,30 +1018,23 @@ class HauptFenster(QMainWindow):
         # "Untersuchung 2" passt nicht in 80px - daher kurz wie in den
         # Ordnernamen (U1_2W_postOP), ausfuehrlich im Tooltip
         if nummer and zeit:
-            dialog_text, knopf_text, _ = OP_BEZUG[op_bezug(meta)]
+            dialog_text, knopf_text, _ = k.OP_BEZUG[op_bezug(meta)]
             u_knopf = QPushButton(f"U{nummer} · {knopf_text}\n{zeit}")
         else:
             u_knopf = QPushButton("U?\nohne Angabe")
         u_knopf.setObjectName("untersuchung_knopf")
-        u_knopf.setFixedWidth(NAV_KNOPF_BREITE)
+        u_knopf.setFixedWidth(k.NAV_KNOPF_BREITE)
         if nummer and zeit:
             u_knopf.setToolTip(f"Untersuchung {nummer}; {zeit} {dialog_text}\nOrdner: {basis}")
         else:
             u_knopf.setToolTip(f"Ordner: {basis}\nNoch keine Angaben; Rechtsklick, Angaben bearbeiten")
         u_knopf.setContextMenuPolicy(Qt.CustomContextMenu)
         u_knopf.customContextMenuRequested.connect(
-            lambda pos, k=u_knopf, po=patient_ordner, b=basis, t=typen: self._untersuchung_menue(k, pos, po, b, t))
+            lambda pos, kn=u_knopf, po=patient_ordner, b=basis, t=typen: self._untersuchung_menue(kn, pos, po, b, t))
         eltern_layout.addWidget(u_knopf, zeile, 1, alignment=Qt.AlignTop)
         u_knopf.clicked.connect(
-            lambda _, k=u_knopf, t=typen: self._untersuchung_klick(k, t))
+            lambda _, kn=u_knopf, t=typen: self._untersuchung_klick(kn, t))
 
-    ICON_ZU_LABEL = {
-            "original": "hand.svg",
-            "isoliert": "finger.svg",
-            "markiert (vom Original)": "stift.svg",
-            "markiert (vom isolierten)": "stift.svg",
-            "genesungsverlauf": "heatmap3D.svg",
-        }
 
     def _untersuchung_klick(self, knopf, typen):
         """Icon-Blase an diesem Knopf aufploppen lassen - oder zu lassen, wenn
@@ -1316,7 +1047,7 @@ class HauptFenster(QMainWindow):
             return
 
         blase = IconBlase(knopf, self._pikto_knoepfe(typen))
-        blase.geschlossen.connect(lambda k=knopf: self._blase_geschlossen(k))
+        blase.geschlossen.connect(lambda kn=knopf: self._blase_geschlossen(kn))
         self._blase = blase
         blase.zeigen()
 
@@ -1329,14 +1060,14 @@ class HauptFenster(QMainWindow):
         for typ_label, pfad in typen.items():
             pikto = QToolButton()
             pikto.setObjectName("pikto_knopf")
-            pikto.setIconSize(QSize(PIKTO_ICON, PIKTO_ICON))
-            pikto.setFixedSize(PIKTO_GROESSE, PIKTO_GROESSE)
+            pikto.setIconSize(QSize(k.PIKTO_ICON, k.PIKTO_ICON))
+            pikto.setFixedSize(k.PIKTO_GROESSE, k.PIKTO_GROESSE)
             pikto.setToolTip(typ_label)
             if typ_label.startswith("vermessen"):
-                pikto.setIcon(QIcon(str(ICON_ORDNER / "vermessen.svg")))
+                pikto.setIcon(QIcon(str(k.ICON_ORDNER / "vermessen.svg")))
                 aktion = lambda pf=pfad: self._vermessung_anzeigen(pf)
             else:
-                pikto.setIcon(QIcon(str(ICON_ORDNER / self.ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
+                pikto.setIcon(QIcon(str(k.ICON_ORDNER / k.ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
                 aktion = lambda pf=pfad: self._scan_laden_aus_pfad(pf)
             pikto.clicked.connect(lambda _, a=aktion: self._aus_blase_laden(a))
             knoepfe.append(pikto)

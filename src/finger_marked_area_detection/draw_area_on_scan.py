@@ -4,23 +4,10 @@ import trimesh
 import numpy as np
 import vtk
 from PIL import Image 
+import konstanten as k
 
-HEATMAPFARBEN = {
-    "rot" : (220, 20, 20),
-    "orange" : (255, 140, 0),
-    "gelb" : (240, 220, 0),
-    "grün" : (30, 180, 30),
-    "blau" : (20, 20, 200)
-}
 
-LANDMARK_NAMEN = {
-    "1" : "linke_rille",
-    "2" : "fingerspitze",
-    "3" : "rechte_rille"
-}
 
-LANDMARK_FARBE = (30, 30, 220) #blau
-LANDMARK_RADIUS = 2
 
 
 def load_teilmeshe_mit_textur(obj_pfad: str):
@@ -74,10 +61,10 @@ def p_v_flaeche_zu_farbigem_obj(flaeche, farbe_rgb, landmarken, save_path):
 
 
 def save_drawn_area(area, original_folder, farbenname, landmarken):
-    if farbenname not in HEATMAPFARBEN:
+    if farbenname not in k.HEATMAPFARBEN:
         raise ValueError(f"Bitte korrekte Heatmapfarbe wählen: (rot, orange, gelb, grün)") 
 
-    farbe = HEATMAPFARBEN[farbenname]
+    farbe = k.HEATMAPFARBEN[farbenname]
 
     save_name = original_folder.name
 
@@ -129,7 +116,7 @@ def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starte
     # Gibt ein dict {name: 3d_punkt oder None} zurueck, das waehrend
     # der Sitzung befuellt wird.
 
-    landmarken = {name: None for name in LANDMARK_NAMEN.values()} #Erstmal das leere dict aufstzen
+    landmarken = {name: None for name in k.LANDMARK_NAMEN.values()} #Erstmal das leere dict aufstzen
  
     def landmark_setzen(name):
         def callback(point, picker):
@@ -158,7 +145,7 @@ def landmarken_picking_einrichten(plotter: p_v.Plotter, pfad_zeichnen_neu_starte
             )
         return taste_callback
  
-    for taste, name in LANDMARK_NAMEN.items():
+    for taste, name in k.LANDMARK_NAMEN.items():
         plotter.add_key_event(taste, taste_gedrueckt(name))
  
     return landmarken
@@ -168,13 +155,13 @@ def landmarken_als_kugeln(landmarken: dict) -> dict:
     """Baut fuer jeden gesetzten Landmark eine kleine, einheitlich
     gefaerbte Kugel-Geometrie (trimesh), fuer den gemeinsamen Export
     mit der Markierungs-Flaeche."""
-    bild = Image.new("RGB", (8, 8), LANDMARK_FARBE)
+    bild = Image.new("RGB", (8, 8), k.LANDMARK_FARBE)
  
     kugeln = {}
     for name, position in landmarken.items():
         if position is None:
             continue
-        kugel = trimesh.creation.icosphere(radius=LANDMARK_RADIUS, subdivisions=1)
+        kugel = trimesh.creation.icosphere(radius=k.LANDMARK_RADIUS, subdivisions=1)
         kugel.apply_translation(position)
         kugel.visual = trimesh.visual.texture.TextureVisuals(
             uv=np.full((len(kugel.vertices), 2), 0.5), image=bild

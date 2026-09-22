@@ -8,25 +8,23 @@ from scipy.spatial import cKDTree
 import re
 
 from draw_area_on_scan import (
-    lese_markierungsfarbe, 
-    extract_faces_of_hand, 
-    HEATMAPFARBEN)
+    lese_markierungsfarbe,
+    extract_faces_of_hand)
+import konstanten as k
 
-FARB_REIHENFOLGE = ["rot", "orange", "gelb", "grün", "blau"]
-FARB_PRIORITAET = {HEATMAPFARBEN[name]: index for index, name in enumerate(FARB_REIHENFOLGE)}
 
 
 def farb_prioritaet(farbe_rgb: tuple) -> int:
-    return FARB_PRIORITAET.get(farbe_rgb, -1)
+    return k.FARB_PRIORITAET.get(farbe_rgb, -1)
 
 
-def finde_nagel_normale(mesh: p_v.PolyData, geklickter_punkt: np.ndarray, k: int = 400) -> np.ndarray:
+def finde_nagel_normale(mesh: p_v.PolyData, geklickter_punkt: np.ndarray, anzahl_nachbarn: int = 400) -> np.ndarray:
     #PCA auf die lokale Nachbarschaft um den geklickten Fingernagel-
     #Punkt - gibt die lokale Oberflaechen-Normale zurueck (Richtung
     #der KLEINSTEN Streuung, da eine Nagel-Oberflaeche lokal recht
     
     baum = cKDTree(mesh.points)
-    _, indices = baum.query(geklickter_punkt, k=k)
+    _, indices = baum.query(geklickter_punkt, k=anzahl_nachbarn)
     nahe_punkte = mesh.points[indices]
     zentriert = nahe_punkte - nahe_punkte.mean(axis=0)
     kovarianz = np.cov(zentriert.T)

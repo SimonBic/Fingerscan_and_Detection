@@ -8,16 +8,12 @@ from scipy.spatial import cKDTree
 import re
 
 from draw_area_on_scan import (
-    lese_markierungsfarbe, 
-    extract_faces_of_hand, 
-    HEATMAPFARBEN)
+    lese_markierungsfarbe,
+    extract_faces_of_hand)
 
 from heatmap3D import (
-    FARB_REIHENFOLGE,
-    FARB_PRIORITAET,
     farb_prioritaet,
-    finde_markierte_scans
-)
+    finde_markierte_scans)
 
 def punkt_abwickeln(punkt: np.ndarray) -> tuple:
     x, y, z = punkt

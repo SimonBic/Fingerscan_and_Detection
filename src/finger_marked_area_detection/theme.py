@@ -79,13 +79,13 @@ QPushButton:pressed {
     border-color: #3A73AD;
 }
 
-QPushButton#zahnrad_knopf {
+QToolButton#zahnrad_knopf {
     border: none;
     background: transparent;
     color: #555555;
-    font-size: 20px;
+    font-size: 28px;   /* das Zeichen ist in den meisten Schriften klein gezeichnet */
 }
-QPushButton#zahnrad_knopf:hover {
+QToolButton#zahnrad_knopf:hover {
     color: #333333;
 }
 
