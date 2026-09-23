@@ -4,7 +4,11 @@ from pathlib import Path
 
 import trimesh
 from scipy.spatial import cKDTree
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 from PIL import Image
+
+import konstanten as k
 
 
 def berechne_normalen(pv_mesh: p_v.PolyData) -> p_v.PolyData:
@@ -266,7 +270,7 @@ def clippe_teile(teile: list, zylinder: p_v.PolyData) -> list:
 
 def pick_finger_point(plotter, mesh):
     punkte = []
-    print("Bitte Wählen Sie den Fingernagel des verlezten Fingers")
+    print("Bitte Wählen Sie den Fingernagel des verletzten Fingers")
 
     def callback(point, picker):
         punkte.append(np.array(point))
@@ -379,18 +383,76 @@ def rotationsmatrix_a_nach_b(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.eye(3) + K * sin_winkel + K @ K * (1 - cos_winkel)
 
 
-def finger_normale(mesh: p_v.PolyData, verletzter_finger: np.ndarray, anzahl_punkte: int = 2000) -> np.ndarray:
+def baue_kantengraph(mesh: p_v.PolyData, max_kantenlaenge: float = k.MAX_KANTENLAENGE) -> csr_matrix:
+    #Kantengerüst des Meshes als gewichteter Graph, damit sich Abstaende
+    #entlang der Oberfläche messen lassen statt quer durch die Luft. Nach Djikstra vom Saatpunkt aus
+    
+    dreiecke = mesh.faces.reshape(-1, 4)[:, 1:]
+    kanten = np.vstack([dreiecke[:, [0, 1]], dreiecke[:, [1, 2]], dreiecke[:, [2, 0]]])
+    kanten = np.unique(np.sort(kanten, axis=1), axis=0)
 
-    if anzahl_punkte > mesh.n_points:
+    laengen = np.linalg.norm(mesh.points[kanten[:, 0]] - mesh.points[kanten[:, 1]], axis=1)
+    brauchbar = laengen <= max_kantenlaenge
+    kanten, laengen = kanten[brauchbar], laengen[brauchbar]
+
+    n = mesh.n_points
+    return csr_matrix(
+        (np.concatenate([laengen, laengen]),
+         (np.concatenate([kanten[:, 0], kanten[:, 1]]),
+          np.concatenate([kanten[:, 1], kanten[:, 0]]))),
+        shape=(n, n),
+    )
+
+
+def geodaetische_nachbarschaft(
+        mesh: p_v.PolyData,
+        saat_punkt: np.ndarray,
+        radius: float,
+        graph: csr_matrix | None = None) -> np.ndarray:
+    #Statt wie davor eine Kugel, jetzt die geodätische Nachbarschaft
+    #Also basically wie weit man auf dem Finger gehen muss, bis der Punkt erreicht ist vom Saatpunkt aus
+    #Nach djiktra
+
+    if graph is None:
+        graph = baue_kantengraph(mesh)
+
+    saat_index = int(mesh.find_closest_point(saat_punkt))
+    abstaende = dijkstra(graph, directed=False, indices=saat_index, limit=radius)
+    indices = np.flatnonzero(np.isfinite(abstaende))
+
+    #Fallback: sitzt der Saatpunkt auf einem Scan-Artefakt (duenner Auswuchs,
+    #der in einer geschlossenen Blase endet), ist die Nachbarschaft winzig.
+    #Dann lieber den Radius aufziehen als eine entartete PCA rechnen.
+    radius_versuch = radius
+    while len(indices) < k.MIN_PCA_PUNKTE and radius_versuch < radius * k.RADIUS_MAX_FAKTOR:
+        radius_versuch *= 1.5
+        abstaende = dijkstra(graph, directed=False, indices=saat_index, limit=radius_versuch)
+        indices = np.flatnonzero(np.isfinite(abstaende))
+
+    if radius_versuch != radius:
+        print(f"Achtung: bei {radius:.0f} mm um den gewaehlten Punkt lagen zu wenige "
+              f"Vertices, Radius auf {radius_versuch:.0f} mm aufgezogen ({len(indices)} Punkte). "
+              f"Die Fingerachse bitte in der Vorschau pruefen.")
+
+    if len(indices) < k.MIN_PCA_PUNKTE:
         raise ValueError(
-            f"anzahl_punkte ({anzahl_punkte}) ist größer als die Gesamtzahl "
-            f"der Vertices im Mesh ({mesh.n_points})."
+            f"Nur {len(indices)} Punkte im Umkreis von {radius_versuch:.0f} mm um den "
+            f"gewaehlten Punkt gefunden (mindestens {k.MIN_PCA_PUNKTE} noetig). Der Punkt "
+            f"liegt vermutlich auf einem Scan-Artefakt - bitte erneut auf die Fingerkuppe klicken."
         )
 
-    baum = cKDTree(mesh.points)
-    _, indices = baum.query(verletzter_finger, k = anzahl_punkte)
+    return indices
+
+#Dann weiter wie gehabt: 
+
+def finger_normale(mesh: p_v.PolyData,
+                   verletzter_finger: np.ndarray,
+                   radius: float = k.PCA_RADIUS,
+                   graph: csr_matrix | None = None) -> np.ndarray:
+
+    indices = geodaetische_nachbarschaft(mesh, verletzter_finger, radius, graph)
     nahe_punkte = mesh.points[indices]
- 
+
     zentriert = nahe_punkte - nahe_punkte.mean(axis=0)
     kovarianz = np.cov(zentriert.T)
     eigenwerte, eigenvektoren = np.linalg.eigh(kovarianz)
@@ -549,14 +611,23 @@ def lade_isolate_finger_parameter(scan_ordner: Path) -> dict | None:
         name, wert = zeile.split("=")
         werte[name.strip()] = float(wert.strip())
 
-    return werte     
+    #Aeltere Dateien haben noch anzahl_punkte_pca (Punktzahl einer
+    #euklidischen Kugel). Das laesst sich nicht in einen Radius entlang der
+    #Oberflaeche umrechnen, weil die alte Kugel je nach Scan bis auf den
+    #Nachbarfinger uebergriff. Darum wird der Wert verworfen und der
+    #eingemessene Default gesetzt.
+    if "pca_radius" not in werte:
+        werte.pop("anzahl_punkte_pca", None)
+        werte["pca_radius"] = k.PCA_RADIUS
+
+    return werte
 
 def speichere_isolate_finger_parameter(
             scan_ordner: Path,
             radius_faktor: float,
             laengen_faktor: float,
             unterschreitung: float,
-            anzahl_punkte_pca: float = 3000) -> Path:
+            pca_radius: float = k.PCA_RADIUS) -> Path:
 
     pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
     pfad.parent.mkdir(parents=True, exist_ok=True)
@@ -564,7 +635,7 @@ def speichere_isolate_finger_parameter(
         f"radius_faktor={radius_faktor}\n"
         f"laengen_faktor={laengen_faktor}\n"
         f"unterschreitung={unterschreitung}\n"
-        f"anzahl_punkte_pca={anzahl_punkte_pca}\n"
+        f"pca_radius={pca_radius}\n"
     )
     return pfad
 
@@ -575,7 +646,7 @@ def isolate_finger(path: str,
                 radius_faktor = 2.0,
                 laengen_faktor = 0.8,
                 unterschreitung = 0.45,
-                anzahl_punkte_pca = 3000,
+                pca_radius = k.PCA_RADIUS,
                 zeige_zwischenschritte = True):
     path = Path(path)
 
@@ -624,9 +695,11 @@ def isolate_finger(path: str,
     #Djikstra & gleichzeitig tiefster Punkt (still, kein Zwischenschritt mehr)
     tiefster_punkt, pfad_mesh, kugel = djikstra_und_tiefster_punkt(hand_ausgerichtet, hurt_finger, second_finger)
 
-    #Normale mit PCA (still, kein Zwischenschritt mehr)
+    #Normale mit PCA (still, kein Zwischenschritt mehr).
+    
+    kantengraph = baue_kantengraph(hand_ausgerichtet)
     normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
-        hand_ausgerichtet, hurt_finger, int(anzahl_punkte_pca)
+        hand_ausgerichtet, hurt_finger, pca_radius, kantengraph
     )
 
     #Einziger verbleibender Zwischenschritt: Ellipsoid live einstellbar.
@@ -643,18 +716,19 @@ def isolate_finger(path: str,
             "tiefster_punkt": tiefster_punkt,
             "hand_ausgerichtet": hand_ausgerichtet,
             "hurt_finger": hurt_finger,
-            "anzahl_punkte_pca": anzahl_punkte_pca,
+            "pca_radius": pca_radius,
+            "kantengraph": kantengraph,
         }
         if empfangene_werte is not None:
             radius_faktor = empfangene_werte.get("radius_faktor", radius_faktor)
             laengen_faktor = empfangene_werte.get("laengen_faktor", laengen_faktor)
             unterschreitung = empfangene_werte.get("unterschreitung", unterschreitung)
 
-            neue_anzahl_punkte_pca = empfangene_werte.get("anzahl_punkte_pca", anzahl_punkte_pca)
-            if neue_anzahl_punkte_pca != anzahl_punkte_pca:
-                anzahl_punkte_pca = neue_anzahl_punkte_pca
+            neuer_pca_radius = empfangene_werte.get("pca_radius", pca_radius)
+            if neuer_pca_radius != pca_radius:
+                pca_radius = neuer_pca_radius
                 normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
-                    hand_ausgerichtet, hurt_finger, int(anzahl_punkte_pca)
+                    hand_ausgerichtet, hurt_finger, pca_radius, kantengraph
                 )
 
     elif zeige_zwischenschritte:

@@ -235,8 +235,15 @@ class HauptFenster(QMainWindow):
         self.slider_laenge = self._ellipsoid_slider(30, 150, 80, ellipsoid_layout, self.label_laenge)
         self.label_unterschreitung = QLabel("Unterschreitung: 0.45")
         self.slider_unterschreitung = self._ellipsoid_slider(0, 100, 45, ellipsoid_layout, self.label_unterschreitung)
-        self.label_pca_punkte = QLabel("PCA-Punkte: 3000")
-        self.slider_pca_punkte = self._ellipsoid_slider(200, 20000, 3000, ellipsoid_layout, self.label_pca_punkte)
+        self.label_pca_radius = QLabel(f"Achsen-Radius: {k.PCA_RADIUS:.0f} mm")
+        self.slider_pca_radius = self._ellipsoid_slider(
+            int(k.PCA_RADIUS_MIN), int(k.PCA_RADIUS_MAX), int(k.PCA_RADIUS),
+            ellipsoid_layout, self.label_pca_radius)
+        self.slider_pca_radius.setToolTip(
+            "Wie weit ab der Fingerkuppe ENTLANG DER OBERFLÄCHE Punkte für die "
+            "Fingerachse gesammelt werden. Zu klein: die Achse wird instabil, weil "
+            "nur die runde Kuppe erfasst ist. Zu groß: der Knöchel zieht die Achse schief."
+        )
         self.button_ellipsoid_bestaetigen = self._knopf("Bestätigen", self.ellipsoid_bestaetigen_klick, ellipsoid_layout)
         self.knopf_layout.addWidget(self.ellipsoid_einstellen_container)
         self.ellipsoid_einstellen_container.setVisible(False)
@@ -1332,22 +1339,29 @@ class HauptFenster(QMainWindow):
         radius_faktor = self.slider_radius.value() / 100
         laengen_faktor = self.slider_laenge.value() / 100
         unterschreitung = self.slider_unterschreitung.value() / 100
-        anzahl_punkte_pca = self.slider_pca_punkte.value()
+        pca_radius = float(self.slider_pca_radius.value())
         self.label_radius.setText(f"Breite: {radius_faktor:.2f}")
         self.label_laenge.setText(f"Länge: {laengen_faktor:.2f}")
         self.label_unterschreitung.setText(f"Unterschreitung: {unterschreitung:.2f}")
-        self.label_pca_punkte.setText(f"PCA-Punkte: {anzahl_punkte_pca}")
 
-        if anzahl_punkte_pca != self.ellipsoid_kontext.get("anzahl_punkte_pca"):
+        if pca_radius != self.ellipsoid_kontext.get("pca_radius"):
+            #Der Kantengraph kommt fertig aus der Pipeline, die Neuberechnung
+            #kostet damit nur wenige Millisekunden - das darf am Regler haengen.
             normale, verwendete_vertices, avg_point_of_hurt_finger = finger_normale(
                 self.ellipsoid_kontext["hand_ausgerichtet"],
                 self.ellipsoid_kontext["hurt_finger"],
-                anzahl_punkte_pca,
+                pca_radius,
+                self.ellipsoid_kontext["kantengraph"],
             )
             self.ellipsoid_kontext["normale"] = normale
             self.ellipsoid_kontext["verwendete_vertices"] = verwendete_vertices
             self.ellipsoid_kontext["avg_point_of_hurt_finger"] = avg_point_of_hurt_finger
-            self.ellipsoid_kontext["anzahl_punkte_pca"] = anzahl_punkte_pca
+            self.ellipsoid_kontext["pca_radius"] = pca_radius
+
+        self.label_pca_radius.setText(
+            f"Achsen-Radius: {pca_radius:.0f} mm "
+            f"({len(self.ellipsoid_kontext['verwendete_vertices'])} Punkte)"
+        )
 
         ellipsoid = erstelle_schnitt_ellipsoid(
             self.ellipsoid_kontext["avg_point_of_hurt_finger"],
@@ -1364,7 +1378,7 @@ class HauptFenster(QMainWindow):
             "radius_faktor": self.slider_radius.value() / 100,
             "laengen_faktor": self.slider_laenge.value() / 100,
             "unterschreitung": self.slider_unterschreitung.value() / 100,
-            "anzahl_punkte_pca": self.slider_pca_punkte.value(),
+            "pca_radius": float(self.slider_pca_radius.value()),
         }
         ordner = Path(self.aktueller_ordner)
         self.ellipsoid_einstellen_container.setVisible(False)

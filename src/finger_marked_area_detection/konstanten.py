@@ -162,4 +162,45 @@ ANTEIL_CHECKBOX_HILFE = ("Berechnet beim Speichern, wie viel Prozent der Fingerf
                          "ab der Zwischenfingerfalte markiert wurde, und schreibt es in "
                          "die Excel-Liste.")
 ANTEIL_CHECKBOX_GESPERRT = ("Nur bei einem isolierten Finger möglich. Bei einem ganzen "
-                            "Hand-Scan gibt es keine Zwischenfingerfalte als Bezug.")
+                            "Hand-Scan gibt es leider keine Zwischenfingerfalte als Bezug.")
+
+
+# ---------- Finger isolieren: PCA-Nachbarschaft ----------
+
+# Die Fingerachse entsteht aus einer PCA ueber die Punkte rund um die
+# angeklickte Fingerkuppe. Frueher waren das die k naechsten Punkte im
+# euklidischen Sinn, die Iddee griff regelmaessig auf den Nachbarfinger ueber,
+# der in einem TEst nur etwa 26 mm Luftlinie entfernt ist. Gemessen an einem echten Scan
+# stammten bei k=3000 rund 29 % der Punkte vom falschen Finger, und die
+# Achse lag 64 Grad daneben.
+#
+# Jetzt wird geodätisch gemessen, also entlang der Oberflaeche. Von einer
+# Fingerkuppe zur anderen sind das 135 mm, weil der Weg einmal runter zur
+# Zwischenfingerfalte und wieder hoch muss. Damit ist der Nachbarfinger
+# ausser Reichweite, ohne dass man irgendetwas segmentieren muesste.
+#
+# 40 mm ist an echten Scans eingemessen:
+#   20 mm -> Achse entartet (nur die Kuppe, Eigenwerte fast gleich, 66 Grad Fehler)
+#   30 mm -> 16 Grad Fehler
+#   40 mm -> 7.6 Grad Fehler, Eigenwert-Verhaeltnis 3.5   <- hier
+#   50 mm -> 1.4 Grad Fehler
+#   60 mm -> driftet wieder, weil der Knoechel dazukommt
+# Nach oben ist bis ~100 mm Luft, bevor ueberhaupt der erste Punkt des
+# Nachbarfingers erreicht wird.
+PCA_RADIUS = 40.0                  # mm, entlang der Oberflaeche
+
+# Scan-Artefakte: einzelne Dreiecke ueberbruecken bis zu 65 mm und wuerden
+# den kuerzesten Weg quer durch die Hand springen lassen. 5 mm trennt die
+# sauber ab, ohne die Hand zu zerreissen (groesste zusammenhaengende
+# Komponente bleibt bei 74973 von 74992 Punkten).
+MAX_KANTENLAENGE = 5.0             # mm
+
+# Sitzt der geklickte Punkt auf einem duennen Auswuchs, der in einer
+# geschlossenen Blase endet (~1 % der Vertices), liefert der Radius nur
+# eine Handvoll Punkte. Dann wird der Radius schrittweise aufgezogen.
+MIN_PCA_PUNKTE = 300
+RADIUS_MAX_FAKTOR = 4              # bis zum Vierfachen von PCA_RADIUS
+
+# Grenzen des Reglers im Zwischenschritt
+PCA_RADIUS_MIN = 15.0              # mm
+PCA_RADIUS_MAX = 80.0              # mm
