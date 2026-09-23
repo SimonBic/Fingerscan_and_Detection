@@ -11,6 +11,44 @@ HOWTO_ORDNER = Path(__file__).parent / "howto"
 HOWTO_DATEI = HOWTO_ORDNER / "anleitung.md"
 
 
+# ---------- Anleitung drucken ----------
+
+# Eigenes URL-Schema fuer den Druck-Link in anleitung.md. Damit laesst er
+# sich von echten Web-Links unterscheiden, die ins Browserfenster gehoeren.
+# Schreibweise in der .md:  [Anleitung drucken](drucken:anleitung)
+DRUCK_SCHEMA = "drucken"
+
+DRUCK_FENSTER_TITEL = "Anleitung drucken"
+DRUCK_DOKUMENTNAME = "Fingerscan-Viewer - Anleitung"
+
+# Muss explizit gesetzt werden, sonst erbt der Text die System-Palette.
+# Bei einem dunklen Desktop-Theme kaeme die Anleitung sonst weiss auf
+# weiss aus dem Drucker.
+DRUCK_TEXTFARBE = "#000000"
+
+# Die Anleitung als eigenes Fenster, aufrufbar ueber das Fragezeichen unten
+# links in der laufenden Software
+ANLEITUNG_FENSTER_TITEL = "Anleitung"
+ANLEITUNG_FENSTER_GROESSE = (1000, 800)
+
+# Fragezeichen-Knopf unten links. Quadratisch und bewusst klein - er soll
+# auffindbar sein, ohne den Hauptknoepfen die Aufmerksamkeit zu nehmen.
+HILFE_KNOPF_GROESSE = 36
+HILFE_KNOPF_TEXT = "?"
+HILFE_KNOPF_HILFE = "Anleitung öffnen"
+
+# Die Anzeige laeuft im dunklen Theme - weisse Schrift auf dunklem Grund
+# waere auf Papier unlesbar bzw. eine Tonerverschwendung. Fuer den Druck
+# wird das Dokument deshalb neu aufgebaut und schwarz auf weiss gesetzt.
+DRUCK_STYLESHEET = """
+    body  { color: #000000; font-size: 10pt; }
+    h1,h2 { color: #000000; }
+    a     { color: #000000; }
+    table { border-collapse: collapse; }
+    td,th { border: 1px solid #888888; padding: 3px 6px; }
+"""
+
+
 # ---------- Gespeicherte Einstellungen (QSettings) ----------
 
 EINSTELLUNGEN_FIRMA = "UKR"

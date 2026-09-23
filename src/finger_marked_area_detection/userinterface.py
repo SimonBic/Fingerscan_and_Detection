@@ -116,7 +116,9 @@ from ui_unterklassen.untersuchungs_dialog import (
     UntersuchungDialog,
     op_bezug)
 from ui_unterklassen.blase import IconBlase
-from ui_unterklassen.titel_bildschirm import TitelBildschirm
+from ui_unterklassen.titel_bildschirm import (
+    TitelBildschirm, 
+    AnleitungFenster)
 from ui_unterklassen.root_ordner_dialog import root_ordner_waehlen
 import konstanten as k
 
@@ -127,11 +129,6 @@ def zeit_text(meta):
         return None
     einzahl, mehrzahl, _ = k.ZEIT_EINHEITEN[meta["einheit"]]
     return f"{meta['wert']} {einzahl if meta['wert'] == 1 else mehrzahl}"
-
-
-
-
-
 
 class HauptFenster(QMainWindow):
     def __init__(self):
@@ -163,6 +160,7 @@ class HauptFenster(QMainWindow):
         self.genesungsverlauf_gewinner = {}
         self.genesungsverlauf_aktuell_rotiert = None
         self._genesungsverlauf_mesh_fuer_klick = None
+        self._anleitung_fenster = None
 
         # Zuerst der Title Screen im selben Fenster. Die eigentliche Oberflaeche
         # (mit dem teuren VTK-Viewer) entsteht erst bei "Software starten" -
@@ -326,7 +324,18 @@ class HauptFenster(QMainWindow):
         self.knopf_layout.addWidget(self.navigatecontainer)
         self.navigatecontainer.setVisible(False)
 
+        # --- Fragezeichen unten links ---
         
+        self.knopf_layout.addStretch(1)
+        hilfe_zeile = QHBoxLayout()
+        self.knopf_hilfe = QPushButton(k.HILFE_KNOPF_TEXT)
+        self.knopf_hilfe.setObjectName("hilfe_knopf")
+        self.knopf_hilfe.setFixedSize(k.HILFE_KNOPF_GROESSE, k.HILFE_KNOPF_GROESSE)
+        self.knopf_hilfe.setToolTip(k.HILFE_KNOPF_HILFE)
+        self.knopf_hilfe.clicked.connect(self.zeige_anleitung)
+        hilfe_zeile.addWidget(self.knopf_hilfe)
+        hilfe_zeile.addStretch()
+        self.knopf_layout.addLayout(hilfe_zeile)
 
         # --- Knopf-Spalte ganz links ins Haupt-Layout ---
         haupt_layout.addWidget(self.knopf_spalte)
@@ -472,6 +481,13 @@ class HauptFenster(QMainWindow):
         ziel_layout.addWidget(slider)
         return slider
 
+
+    def zeige_anleitung(self):
+        # Einmal bauen und behalten: so bleibt die Scrollposition erhalten,
+        # wenn man zwischendurch etwas ausprobiert und wieder nachliest.
+        if self._anleitung_fenster is None:
+            self._anleitung_fenster = AnleitungFenster(self)
+        self._anleitung_fenster.zeige()
 
     def _positioniere_overlay_buttons(self):
         rand = 10

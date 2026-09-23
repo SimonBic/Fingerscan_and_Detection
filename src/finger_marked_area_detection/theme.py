@@ -67,6 +67,15 @@ QPushButton#overlay_button {
     border-radius: 0px;
 }
 
+
+QPushButton#hilfe_knopf {
+    
+    border-radius: 6px;
+    padding: 0px;
+    font-size: 18px;
+    font-weight: bold;
+}
+
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                  stop:0 #9CBFE2, stop:1 #7FA5C9);

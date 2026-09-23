@@ -15,7 +15,11 @@ from PySide6.QtGui import (
     QColor,
     QPixmap,
     QTextCursor,
-    QTextBlockFormat)
+    QTextBlockFormat,
+    QTextCharFormat,
+    QTextDocument,
+    QDesktopServices)
+from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (
     QWidget,
     QFrame,
@@ -24,6 +28,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QStackedWidget,
+    QDialog,
     QTextBrowser)
 
 import konstanten as k
@@ -218,7 +223,13 @@ class _HowToSeite(QWidget):
         # Listen, Bilder und Links an und scrollt bei langem Text von selbst.
         self.inhalt = QTextBrowser()
         self.inhalt.setObjectName("howto_inhalt")
-        self.inhalt.setOpenExternalLinks(True)                # Web-Links im Browser oeffnen
+        # setOpenLinks(False) statt setOpenExternalLinks(True): der
+        # Druck-Link ist kein Web-Link, sondern loest eine Aktion aus.
+        # Wuerde Qt die Links selbst oeffnen, landete "drucken:anleitung"
+        # beim Betriebssystem und die Anleitung waere aus dem Fenster
+        # gescrollt. Also alle Klicks selbst entgegennehmen und verteilen.
+        self.inhalt.setOpenLinks(False)
+        self.inhalt.anchorClicked.connect(self.link_geklickt)
         self.inhalt.setSearchPaths([str(k.HOWTO_ORDNER)])      # Bilder neben der .md finden
         self.lade_anleitung()
 
@@ -240,6 +251,60 @@ class _HowToSeite(QWidget):
         zentriert.addWidget(karte, stretch=20)
         zentriert.addStretch(1)
         aussen.addLayout(zentriert)
+
+    def link_geklickt(self, url):
+        # Der Druck-Link in der .md traegt das eigene Schema "drucken:",
+        # damit er sich von echten Web-Links unterscheiden laesst.
+        if url.scheme() == k.DRUCK_SCHEMA:
+            self.drucke_anleitung()
+            return
+        QDesktopServices.openUrl(url)
+
+    def drucke_anleitung(self):
+        # Vorschau statt direktem Druckdialog: die Anleitung ist mehrere
+        # Seiten lang, da will man vorher sehen, was herauskommt. Ueber den
+        # Dialog laesst sie sich auch als PDF sichern.
+        drucker = QPrinter(QPrinter.HighResolution)
+        drucker.setDocName(k.DRUCK_DOKUMENTNAME)
+
+        dialog = QPrintPreviewDialog(drucker, self)
+        dialog.setWindowTitle(k.DRUCK_FENSTER_TITEL)
+        dialog.resize(900, 1000)
+        # Das Dokument der Anzeige traegt die Bildschirmbreite und die
+        # Farben des dunklen Themes. Gedruckt wird deshalb eine eigene,
+        # saubere Kopie aus derselben Markdown-Quelle.
+        dialog.paintRequested.connect(
+            lambda ziel: self._druck_dokument().print_(ziel))
+        dialog.exec()
+
+    def _druck_dokument(self):
+        if k.HOWTO_DATEI.is_file():
+            markdown = k.HOWTO_DATEI.read_text(encoding="utf-8")
+        else:
+            markdown = "*Noch keine Anleitung vorhanden.*"
+
+        # Der Druck-Link ist auf Papier sinnlos - Zeilen mit dem eigenen
+        # Schema fliegen deshalb raus, samt der dadurch leeren Zeile.
+        zeilen = [z for z in markdown.splitlines() if f"({k.DRUCK_SCHEMA}:" not in z]
+        markdown = "\n".join(zeilen).replace("\n\n\n", "\n\n")
+
+        dokument = QTextDocument()
+        dokument.setDefaultStyleSheet(k.DRUCK_STYLESHEET)
+        dokument.setMarkdown(markdown)
+
+        # Ohne das hier kann die Anleitung weiss auf weiss aus dem Drucker
+        # kommen: die Textfarbe stammt sonst aus der System-Palette, und die
+        # ist bei einem dunklen Desktop-Theme nahezu weiss - unabhaengig
+        # davon, dass die App selbst hell gestaltet ist. Weder das Stylesheet
+        # noch die Stiftfarbe des Druckers setzen sich dagegen durch, die
+        # Zeichenformate muessen deshalb direkt gesetzt werden.
+        cursor = QTextCursor(dokument)
+        cursor.select(QTextCursor.Document)
+        format = QTextCharFormat()
+        format.setForeground(QColor(k.DRUCK_TEXTFARBE))
+        cursor.mergeCharFormat(format)
+
+        return dokument
 
     def lade_anleitung(self):
         # Beim Oeffnen der Seite neu lesen: Aenderungen an der .md sind so
@@ -278,8 +343,7 @@ class _HowToSeite(QWidget):
 
 
 class TitelBildschirm(QWidget):
-    # Startseite im Hauptfenster. Kennt weder QSettings noch das Hauptfenster -
-    # es meldet nur per Signal, was geklickt wurde.
+    #meldet nur per Signal, was geklickt wurde.
 
     software_starten = Signal()
     root_ordner_bearbeiten = Signal()
@@ -292,7 +356,7 @@ class TitelBildschirm(QWidget):
         self.hintergrund = NetzHintergrund()
         aussen.addWidget(self.hintergrund)
 
-        # Seiten liegen durchsichtig auf dem Netz - es laeuft auf beiden weiter
+        # Seiten liegen durchsichtig auf dem Netz
         auf_netz = QVBoxLayout(self.hintergrund)
         auf_netz.setContentsMargins(0, 0, 0, 0)
         self.seiten = QStackedWidget()
@@ -323,3 +387,29 @@ class TitelBildschirm(QWidget):
         self.menue.knopf_start.setText("Wird gestartet …")
         for knopf in (self.menue.knopf_start, self.menue.knopf_root, self.menue.knopf_howto):
             knopf.setEnabled(False)
+
+
+class AnleitungFenster(QDialog):
+    
+
+    def __init__(self, eltern=None):
+        super().__init__(eltern)
+        self.setWindowTitle(k.ANLEITUNG_FENSTER_TITEL)
+        self.resize(*k.ANLEITUNG_FENSTER_GROESSE)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.seite = _HowToSeite(self)
+        # Im Fenster fuehrt "Zurueck" nicht auf eine andere Seite, sondern
+        # schliesst es
+        self.seite.knopf_zurueck.setText("Schließen")
+        self.seite.knopf_zurueck.clicked.connect(self.accept)
+        layout.addWidget(self.seite)
+
+    def zeige(self):
+        # Beim Oeffnen neu einlesen, wie auf dem Title Screen auch
+        self.seite.lade_anleitung()
+        self.show()
+        self.raise_()
+        self.activateWindow()
