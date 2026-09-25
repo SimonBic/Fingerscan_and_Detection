@@ -13,3 +13,9 @@ __pycache__/
 *.mtl
 
 *.json
+
+
+overlay_*.png
+*_diffuse.png
+debugfiles/*.png
+src/finger_marked_area_detection/debugfiles/*.png

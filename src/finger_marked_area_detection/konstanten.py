@@ -242,3 +242,152 @@ RADIUS_MAX_FAKTOR = 4              # bis zum Vierfachen von PCA_RADIUS
 # Grenzen des Reglers im Zwischenschritt
 PCA_RADIUS_MIN = 15.0              # mm
 PCA_RADIUS_MAX = 80.0              # mm
+
+
+# ---------- Automatische Markierungserkennung ----------
+
+# Die Stiftlinie wird in der Textur gesucht, das Ergebnis aber pro VERTEX
+# gebraucht. Beides passt nicht zusammen: an einem echten Scan gemessen ist
+# die Linie ~25 Texel breit, benachbarte Vertices liegen aber median 14
+# Texel auseinander. Wer pro Vertex genau EIN Texel liest, trifft die Linie
+# nur zufaellig - gemessen 1018 von 98600 Vertices, waehrend eine Abtastung
+# der Umgebung 2463 findet. Genau das war die Ursache fuer "zu wenig
+# erkannt".
+#
+# Statt die ganze Textur aufzuweiten (8192^2 = 67 Mio. Texel, als RGB rund
+# 400 MB) wird pro Vertex ein kleines Raster gelesen und der kleinste
+# Farbabstand darin genommen: 25 Nachschlaege pro Vertex statt 67 Mio.
+RASTER_GROESSE = 5                 # 5x5 Texel pro Vertex
+
+# Wie weit das Raster gespreizt wird, als Anteil des gemessenen medianen
+# Vertexabstands in Texeln. 0.5 heisst: bis zur Mitte zum Nachbarvertex -
+# zusammen decken die Vertices die Flaeche damit lueckenlos ab, ohne dass
+# sich benachbarte Raster nennenswert ueberlappen.
+RASTER_SPREIZUNG = 0.5
+
+# Ein fester Toleranzwert traegt nicht ueber verschiedene Scans: mit der
+# korrekten Texturfarbe und Toleranz 100 gelten 8,3 % der Textur als
+# Markierung (vor allem beschattete Haut), mit 60 nur 1,4 %. Die Schwelle
+# wird deshalb pro Scan bestimmt: typischer Hautabstand minus drei robuste
+# Standardabweichungen. Der Faktor 3 ist an echten Scans eingemessen - er
+# liefert dort eine Schwelle von ~68 und trifft 3,4 % der Vertices, also
+# genau den Bereich, in dem die Stiftlinie endet.
+SCHWELLE_MAD_FAKTOR = 3.0
+
+# Die Schwelle muss zu einer plausiblen Markierungsgroesse fuehren -
+# sonst greift FALLBACK_TOLERANZ.
+MIN_MARKIERUNGS_ANTEIL = 0.0005    # 0,05 % der Vertices
+MAX_MARKIERUNGS_ANTEIL = 0.05      # 5 % - darueber ist es keine Markierung mehr
+
+
+# Greift die Luecken-Suche nicht (z. B. weil die Verteilung keinen klaren
+# Sprung hat), wird auf diesen Wert zurueckgefallen.
+FALLBACK_TOLERANZ = 60.0
+
+# Die Pipette nimmt nicht stur das getroffene Texel: die Stiftlinie ist
+# nur ~25 Texel breit bei ~14 Texel Vertexabstand, ein Vertex trifft den
+# Linienkern also selten mittig. Stattdessen wird in dieser Umgebung die
+# reinste Auspraegung dessen gesucht, worauf geklickt wurde.
+PIPETTE_RADIUS_TEXEL = 10
+
+# Anteil der extremsten Texel, aus denen die Farbe gemittelt wird.
+PIPETTE_AUFFAELLIG_PROZENT = 10
+
+# Hebt sich das geklickte Texel weniger als das vom Untergrund ab, war der
+# Klick auf gleichmaessiger Flaeche - dann gibt es keine Markierung zu
+# treffen und der Untergrund wird zurueckgegeben.
+PIPETTE_MIN_ABHEBUNG = 5.0
+
+
+# ---------- Flaeche aus der Markierung fuellen ----------
+
+# Die erkannte Stiftlinie ist ein BAND von mehreren Vertices Breite, kein
+# Strich. Sie zu einer Schleife zu ordnen scheitert daran (gemessen: von
+# 20 Naechster-Nachbar-Ketten schloss sich keine einzige, jeder dritte
+# Schritt kehrte die Richtung um). Stattdessen wird das Band samt der von
+# ihm eingeschlossenen Flaeche genommen - der Zickzack liegt dann innen.
+
+                                   # sondern ein anderer Fleck auf dem Finger
+
+
+# ---------- Schwarzer Stift auf heller Haut ----------
+
+# Werte aus GIMP 3.2.4, an echten Scans erprobt: leicht entsaettigen,
+# Helligkeit und Kontrast anheben, dann harter Schwellwert. Danach ist nur
+# noch die Markierung dunkel.
+#
+# Die Umsetzung benutzt GIMPs eigene Formeln, deshalb entsprechen diese
+# Zahlen genau den Reglern im Dialog:
+#   Farben > Saettigung           Skala 0,7
+#   Farben > Helligkeit/Kontrast  +9 % / +48 %
+#   Farben > Schwellwert          110
+STIFT_SAETTIGUNG = 0.7
+STIFT_HELLIGKEIT = 0.09
+STIFT_KONTRAST = 0.48
+
+# Beschriftung des Knopfes: benennt die Bildbedingungen, nicht Menschen.
+# Fuer andere Hautfarben ist ein eigenes Verfahren vorgesehen.
+STIFT_KNOPF_TEXT = "Schwarzer Stift,\nhelle Haut"
+STIFT_KNOPF_HILFE = ("Erkennt eine schwarze Stiftmarkierung auf heller Haut und füllt "
+                     "den eingekreisten Bereich. Nur am isolierten Finger.")
+
+# Das Mesh wird vor dem Schneiden unterteilt, sonst ist es zu grob fuer
+# die Linie: die Vertices liegen rund 23 Texel auseinander, die Linie ist
+# rund 25 Texel breit. Zwei Stufen bringen den Punktabstand auf knapp
+# 6 Texel - fein genug, um die Linie durchgehend zu erfassen, und immer
+# noch schnell (gemessen 0,1 s fuer einen Finger).
+STIFT_UNTERTEILUNGEN = 2
+
+# Wie nah ein Punkt am urspruenglichen Fingerrand liegen muss, um als
+# "am Rand" zu gelten
+RAND_ABSTAND_TOLERANZ = 0.01       # mm
+
+
+# ---------- Markierung ueber gerenderte Ansichten ----------
+
+# Der Finger wird von mehreren Seiten gerendert und auf jedes Bild die
+# Filterkette angewandt. Gemessen an einem Viewer-Screenshot liegen Haut
+# (Median 232 nach der Kette) und Strich (Median 135) weit auseinander,
+# und es wird KEINE Haut faelschlich markiert - 0,0 % bei Schwellen von
+# 110 bis 140. Auf der rohen Textur liefen dagegen Schatten mit hinein.
+ANSICHTEN_RUNDUM = 10              # Kameras rings um die Fingerachse
+ANSICHTEN_SCHRAEG = 5              # je Ring von schraeg oben und unten
+ANSICHT_SCHRAEG_GRAD = 35.0        # wie weit die schraegen Ringe gekippt sind
+
+# Simons Wert, in GIMP auf einem Viewer-Screenshot eingemessen. Gilt nur
+# fuer gerenderte Bilder - auf der Textur bedeutet dieselbe Zahl etwas
+# anderes, deshalb steht STIFT_SCHWELLE davon getrennt.
+STIFT_SCHWELLE_ANSICHT = 120.0
+
+# An der Umrisskante wird ein Face streifend getroffen: wenige Pixel
+# decken viele Faces, und die Zuordnung wird unzuverlaessig. Solche Faces
+# werden verworfen - eine andere Ansicht sieht sie ohnehin frontal.
+MIN_BLICKWINKEL_COS = 0.35         # entspricht rund 70 Grad zur Normalen
+
+
+# Diagnosebilder der Ansichten. Liegt ausserhalb des Repositorys -
+# Patientendaten gehoeren dort niemals hin.
+ANSICHT_DIAGNOSE_ORDNER = (Path.home() / "Arbeit" / "UKR" /
+                           "Diagnose_Ausgaben_Fingerscan_Viewer" / "Ausgabe_GIMP_Kette")
+
+# Unterbrechungen im Strich: blasse Stellen oder kleine Loecher im Mesh
+# zerlegen die Linie. An einem echten Finger gemessen waren es drei
+# grosse Stuecke mit Luecken von 1,15 mm und 1,57 mm.
+# 3,5 mm deckt die beobachteten Luecken ab (1,15 / 1,57 / 1,90 mm) und
+# laesst den Schatten in der Zwischenfingerfalte draussen, der 8,65 mm
+# entfernt liegt und NICHT zur Markierung gehoert.
+MAX_LUECKE_MM = 3.5
+
+# Grosszuegig: gebrueckt wird immer vom Hauptstrich aus, und die
+# Laengengrenze verhindert Ausreisser. An einem echten Finger waren 27
+# Bruecken noetig, die meisten davon unter 1 mm.
+MAX_LUECKEN = 80
+
+
+# Breite, in der eine gezogene Bruecke gezeichnet wird - ungefaehr die
+# Dicke des Stiftstrichs, damit die Bruecke nicht als Haarriss auffaellt.
+STRICH_DICKE_MM = 0.8
+
+# Kleinere Stuecke ziehen keine Bruecken nach sich: einzelne Fehlpixel
+# sollen den Strich nicht quer ueber den Finger verlaengern.
+MIN_STUECK_PIXEL = 30

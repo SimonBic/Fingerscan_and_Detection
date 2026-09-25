@@ -243,6 +243,11 @@ def extract_faces_of_hand(hand_mesh, mask):
         if np.any(mask[ids]):
             neue_faces.append(ids)
 
+    # Leere Maske: np.hstack wuerde an der Form (0,) scheitern, noch bevor
+    # der n_points-Check der Aufrufer ueberhaupt greift.
+    if not neue_faces:
+        return p_v.PolyData()
+
     faces_array = np.array(neue_faces)
 
     vtk_faces = np.hstack([

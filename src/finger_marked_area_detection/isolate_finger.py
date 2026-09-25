@@ -211,9 +211,21 @@ def load_teilmeshe_mit_textur(obj_pfad: str):
 
  
 
+def rendere_teile(plotter, teile: list) -> None:
+    # EINE Stelle fuer die Darstellung - die Oberflaeche und die
+    # Screenshots der Markierungserkennung muessen exakt gleich aussehen,
+    # sonst gilt der dort eingemessene Schwellwert nicht mehr.
+    for pv_mesh, tex in teile:
+        if tex is not None:
+            plotter.add_mesh(pv_mesh, texture=tex, smooth_shading=False)
+        elif "RGB" in pv_mesh.point_data:
+            plotter.add_mesh(pv_mesh, scalars="RGB", rgb=True, smooth_shading=True)
+        else:
+            plotter.add_mesh(pv_mesh)
+
+
 def zeige_mit_texturen(plotter: p_v.Plotter, teile: list) -> None:
-    for teil, farben in teile:
-        plotter.add_mesh(teil, texture=farben)
+    rendere_teile(plotter, teile)
  
  
 def transformiere_teile(teile: list, transform_matrix) -> list:

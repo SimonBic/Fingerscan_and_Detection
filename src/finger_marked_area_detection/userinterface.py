@@ -5,7 +5,9 @@ import json
 import time
 from matplotlib import container
 import pyvista as p_v
+import vtk
 import numpy as np
+from scipy.spatial import cKDTree
 from pathlib import Path
 from collections import defaultdict
 
@@ -70,7 +72,9 @@ from utils import generator_bis_ende
 from farberkennung import (
     finde_markierungs_punkte,
     entferne_ausreisser_punkte,
-    baue_geschlossenen_pfad)
+    baue_geschlossenen_pfad,
+    textur_farbe_an_punkt)
+from schwarzer_stift import markiere_strich
 from messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
@@ -81,6 +85,7 @@ from messungen import (
     volumen_gesamtes_mesh)
 from farbauswahl_widget import FarbAuswahlWidget
 from isolate_finger import (
+    rendere_teile,
     load_teilmeshe_mit_textur,
     isolate_finger,
     erstelle_schnitt_ellipsoid,
@@ -256,6 +261,13 @@ class HauptFenster(QMainWindow):
         malen_wahl_layout = QVBoxLayout(self.malen_wahl_container)
         self.button_weiter_malen = self._knopf("Fertig manuell\ngemalt", self.weiter_klick_malen, malen_wahl_layout)
         self.button_weiter_malen.setVisible(False)
+        # Der Standardfall: schwarzer Stift auf heller Haut. Braucht weder
+        # Pipette noch Farbwahl, weil Schwellwert und Bildaufbereitung fest
+        # sind. Steht deshalb ueber der allgemeinen Variante.
+        self.button_stift_einzeichnen = self._knopf(
+            k.STIFT_KNOPF_TEXT, self.stift_einzeichnen_klick, malen_wahl_layout)
+        self.button_stift_einzeichnen.setToolTip(k.STIFT_KNOPF_HILFE)
+
         self.button_automatisch_einzeichnen = self._knopf(
             "Automatisch einzeichnen", self.automatisch_einzeichnen_klick, malen_wahl_layout)
 
@@ -513,37 +525,9 @@ class HauptFenster(QMainWindow):
         self.lade_und_zeige(ordner)
 
     def _rendere_teile(self, teile: list) -> None:
-        for pv_mesh, tex in teile:
-
-            if tex is not None:
-                # -----------------------------------------
-                # Mesh besitzt eine JPG/PNG-Textur
-                # -----------------------------------------
-                self.plotter.add_mesh(
-                    pv_mesh,
-                    texture=tex,
-                    smooth_shading=False
-                )
-
-            elif "RGB" in pv_mesh.point_data:
-                # -----------------------------------------
-                # Mesh besitzt Vertex-Farben
-                # -----------------------------------------
-                self.plotter.add_mesh(
-                    pv_mesh,
-                    scalars="RGB",
-                    rgb=True,
-                    smooth_shading=True
-                )
-
-            else:
-                # -----------------------------------------
-                # Fallback: Mesh ohne Farbe/Textur
-                # -----------------------------------------
-                self.plotter.add_mesh(
-                    pv_mesh,
-                    smooth_shading=False
-                )
+        # Gemeinsame Funktion, damit die Screenshots der
+        # Markierungserkennung exakt so aussehen wie der Viewer.
+        rendere_teile(self.plotter, teile)
 
     def lade_und_zeige(self, pfad: Path):
         # Patient des geladenen Scans mitbeobachten
@@ -1465,6 +1449,71 @@ class HauptFenster(QMainWindow):
         self.haupt_buttons_container.setVisible(True)
         self.navigatecontainer.setVisible(False)
 
+    def stift_einzeichnen_klick(self):
+        if self.aktueller_ordner is None:
+            self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+
+        # Nur am isolierten Finger: dort liegt die gesamte Textur, die
+        # ueberhaupt abgetastet wird, auf dem Finger selbst - Nachbar-
+        # finger und Hintergrund koennen gar nicht hineingeraten.
+        if not self._ist_isolierter_finger():
+            self.hinweis_label.setText(
+                "Diese Funktion funktioniert nur am isolierten Finger. Bitte erst 'Finger isolieren' "
+                "(Punkt 4 der Anleitung).")
+            return
+
+        self.setze_zeichnungs_status_zurueck()
+        self.hinweis_label.setText("Markierung wird gesucht ...")
+        QApplication.processEvents()
+
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        try:
+            flaeche, bericht = markiere_strich(
+                self.plotter, self.aktuelle_teile,
+                diagnose_ordner=k.ANSICHT_DIAGNOSE_ORDNER)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if flaeche is None or flaeche.n_points == 0:
+            self.hinweis_label.setText(
+                "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
+                f"{k.ANSICHT_DIAGNOSE_ORDNER}.")
+            return
+
+        flaeche.point_data["Selection"] = self._selection_fuer_flaeche(flaeche)
+
+        self.plotter.add_mesh(flaeche, color="red", opacity=0.5)
+        self.plotter.render()
+
+        gesehen = bericht.get("gesehen", 0)
+        faces = bericht.get("faces", 1)
+        self.hinweis_label.setText(
+            f"Strich markiert: {flaeche.area:.0f} mm². "
+            f"{gesehen} von {faces} Flaechenstuecken waren fuer eine Kamera sichtbar. "
+            f"Ansichten zum Nachsehen: {k.ANSICHT_DIAGNOSE_ORDNER}")
+
+        self.zeichnungs_status["flaeche"] = flaeche
+        self.zeichnungs_status["landmarken"] = {}
+        self.zeichnungs_status["punkte_eingezeichnet"] = None
+        self.malen_wahl_container.setVisible(False)
+        self.haupt_buttons_container.setVisible(False)
+        self.farbe_wahl_container.setVisible(True)
+
+    def _selection_fuer_flaeche(self, flaeche):
+        # Baut das Skalarfeld nach, das sonst vtkSelectPolyData liefert.
+        # umfang_der_schnittkante() zaehlt nur Randkanten, deren beide
+        # Enden nahe null liegen. ohne das Feld wuerden auch die Raender
+        # von Loechern im Scan mitgezaehlt und der Umfang faellt zu gross
+        # aus. Der urspruengliche Fingerrand zaehlt ebenfalls nicht mit.
+        selection = np.zeros(flaeche.n_points)
+        finger_rand = self.aktuelles_hand_mesh.extract_feature_edges(
+            boundary_edges=True, feature_edges=False,
+            non_manifold_edges=False, manifold_edges=False)
+        if finger_rand.n_points:
+            abstand = cKDTree(finger_rand.points).query(flaeche.points, k=1)[0]
+            selection[abstand <= k.RAND_ABSTAND_TOLERANZ] = -1.0
+        return selection
+
     def automatisch_einzeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
@@ -1472,7 +1521,8 @@ class HauptFenster(QMainWindow):
 
         self.setze_zeichnungs_status_zurueck()
 
-        markierte_punkte = finde_markierungs_punkte(self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=100.0)
+        markierte_punkte = finde_markierungs_punkte(
+            self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=100.0)
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende Markierung auf dem Scan gefunden.")
             return
@@ -1770,6 +1820,34 @@ class HauptFenster(QMainWindow):
         self.plotter.interactor.installEventFilter(self)
         self.hinweis_label.setText("Pipette aktiv - auf den Scan klicken, um eine Farbe aufzunehmen.")
 
+    def _farbe_am_klick(self, x: int, y: int) -> tuple:
+        # Bevorzugt die Textur: dazu muss der Klick erst auf das Mesh
+        # abgebildet werden. Klappt das nicht (daneben geklickt, keine
+        # Teile geladen), bleibt der alte Weg ueber den Screenshot - der
+        # liefert dann zwar die beleuchtete Farbe, aber immerhin etwas.
+        if self.aktuelle_teile:
+            punkt = self._punkt_unter_maus(x, y)
+            if punkt is not None:
+                hex_code = textur_farbe_an_punkt(self.aktuelle_teile, punkt)
+                if hex_code is not None:
+                    return hex_code, "aus der Textur"
+
+        bild_array = self.plotter.screenshot(return_img=True)
+        hoehe, breite = bild_array.shape[:2]
+        r, g, b = bild_array[min(max(y, 0), hoehe - 1), min(max(x, 0), breite - 1)][:3]
+        return f"#{r:02X}{g:02X}{b:02X}", "vom Bildschirm, bitte genauer treffen"
+
+    def _punkt_unter_maus(self, x: int, y: int):
+        # VTK zaehlt die Bildzeilen von UNTEN, Qt von oben - ohne das
+        # Umdrehen greift die Pipette gespiegelt daneben.
+        _, fenster_hoehe = self.plotter.render_window.GetSize()
+        picker = vtk.vtkCellPicker()
+        picker.SetTolerance(0.005)
+        picker.Pick(x, fenster_hoehe - 1 - y, 0, self.plotter.renderer)
+        if picker.GetCellId() < 0:
+            return None
+        return np.array(picker.GetPickPosition())
+
     def eventFilter(self, obj, event):
         if obj is self.viewer_spalte and event.type() == QEvent.Resize:
             self._positioniere_overlay_buttons()                             
@@ -1784,15 +1862,9 @@ class HauptFenster(QMainWindow):
             skala = self.plotter.interactor.devicePixelRatioF()
             x, y = int(position.x() * skala), int(position.y() * skala)
 
-            bild_array = self.plotter.screenshot(return_img=True)
-            hoehe, breite = bild_array.shape[:2]
-            x = min(max(x, 0), breite - 1)
-            y = min(max(y, 0), hoehe - 1)
-            r, g, b = bild_array[y, x][:3]
-            hex_code = f"#{r:02X}{g:02X}{b:02X}"
-
+            hex_code, quelle = self._farbe_am_klick(x, y)
             self._pipette_ziel_widget.setze_farbe(hex_code)
-            self.hinweis_label.setText(f"Farbe aufgenommen: {hex_code}")
+            self.hinweis_label.setText(f"Farbe aufgenommen: {hex_code} ({quelle})")
             return True
         return super().eventFilter(obj, event)
 
