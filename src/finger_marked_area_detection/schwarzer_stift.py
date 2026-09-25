@@ -8,6 +8,8 @@
 
 #noch unfinshed, da bisher nur der Strich markiert wird, füllen und Fehler aussortieren kommt 
 
+
+
 import numpy as np
 import pyvista as p_v
 from scipy import ndimage

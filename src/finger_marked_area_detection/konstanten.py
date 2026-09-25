@@ -329,7 +329,7 @@ STIFT_KONTRAST = 0.48
 # Fuer andere Hautfarben ist ein eigenes Verfahren vorgesehen.
 STIFT_KNOPF_TEXT = "Schwarzer Stift,\nhelle Haut"
 STIFT_KNOPF_HILFE = ("Erkennt eine schwarze Stiftmarkierung auf heller Haut und füllt "
-                     "den eingekreisten Bereich. Nur am isolierten Finger.")
+                     "den eingekreisten Bereich. Nur am isolierten Finger. AKTUELL NOCH UNFINISEHED.")
 
 # Das Mesh wird vor dem Schneiden unterteilt, sonst ist es zu grob fuer
 # die Linie: die Vertices liegen rund 23 Texel auseinander, die Linie ist
@@ -354,9 +354,9 @@ ANSICHTEN_RUNDUM = 10              # Kameras rings um die Fingerachse
 ANSICHTEN_SCHRAEG = 5              # je Ring von schraeg oben und unten
 ANSICHT_SCHRAEG_GRAD = 35.0        # wie weit die schraegen Ringe gekippt sind
 
-# Simons Wert, in GIMP auf einem Viewer-Screenshot eingemessen. Gilt nur
-# fuer gerenderte Bilder - auf der Textur bedeutet dieselbe Zahl etwas
-# anderes, deshalb steht STIFT_SCHWELLE davon getrennt.
+# In GIMP an einem Viewer-Screenshot eingemessen. Gilt nur fuer
+# gerenderte Bilder - auf der rohen Textur bedeutet dieselbe Zahl etwas
+# ganz anderes, dort liegen Haut und Strich viel weiter auseinander.
 STIFT_SCHWELLE_ANSICHT = 120.0
 
 # An der Umrisskante wird ein Face streifend getroffen: wenige Pixel
