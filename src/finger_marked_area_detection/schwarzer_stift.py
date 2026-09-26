@@ -296,28 +296,78 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None):
                     "strich": int(strich.sum())}
 
 
+def _flaeche_aus_faces(fein, strich):
+    dreiecke = fein.faces.reshape(-1, 4)[:, 1:][strich]
+    vtk_faces = np.hstack([np.full((len(dreiecke), 1), 3), dreiecke])
+    return p_v.PolyData(fein.points, vtk_faces).clean()
+
+def _split_finger_teile(fein_ganz, strich):
+    #Trennt den Finger in zwei Teile, das innere vom Strich und das aeussere.
+    #Prueft dann, welches Teil weniger Randkanten hat und fuegt den Strich
+    #wieder dazu.
+    fein_ganz = fein_ganz.clean()
+    
+    finger_ohne_strich = fein_ganz.extract_cells(~strich).connectivity("all")
+
+    kennung = np.asarray(finger_ohne_strich.cell_data["RegionId"])
+    groessen = np.bincount(kennung)
+
+    if len(groessen) < 2:
+        return None
+
+    erstes, zweites = np.argsort(groessen)[::-1][:2]
+
+    groesstes_teil = finger_ohne_strich.extract_cells(kennung == erstes)
+    zweit_groesstes_teil = finger_ohne_strich.extract_cells(kennung == zweites)
+
+    rand_teile_groesstes_teil_anzahl = groesstes_teil.extract_feature_edges(boundary_edges=True,
+                                                                     feature_edges=False,
+                                                                     non_manifold_edges=False,
+                                                                     manifold_edges=False).n_cells
+
+    rand_teile_zweit_groesstes_teil_anzahl = zweit_groesstes_teil.extract_feature_edges(boundary_edges=True,
+                                                                     feature_edges=False,
+                                                                     non_manifold_edges=False,
+                                                                     manifold_edges=False).n_cells
+
+    if rand_teile_groesstes_teil_anzahl < rand_teile_zweit_groesstes_teil_anzahl:
+        inneres_teil = groesstes_teil
+    else:
+        inneres_teil = zweit_groesstes_teil
+
+    #extract_surface, weil extract_cells ein UnstructuredGrid liefert. Das
+    #Speichern braucht spaeter reine Dreiecke als PolyData.
+
+    innen = inneres_teil.extract_surface(algorithm="dataset_surface")
+    gesamtflaeche = innen.merge(_flaeche_aus_faces(fein_ganz, strich))
+    return gesamtflaeche.clean()
+
+
 # ---------- Hauptfunktion ----------
 
 def markiere_strich(plotter, teile, diagnose_ordner=None):
-    # Der ganze Ablauf in einem Blick. Alles Inhaltliche steht oben.
+    # Der ganze Ablauf 
     mit_bild = [(mesh, tex) for mesh, tex in teile if mesh.n_points]
     if not mit_bild:
         return None, {}
 
     ganz = p_v.merge([mesh for mesh, _ in mit_bild]) if len(mit_bild) > 1 else mit_bild[0][0]
 
-    # Unterteilen, damit ein Dreieck nur wenige Pixel gross ist - sonst
-    # ist das Mesh zu grob fuer die Linie.
+    # Unterteilen, damit ein Dreieck nur wenige Pixel gross ist 
     fein = ganz.subdivide(k.STIFT_UNTERTEILUNGEN, subfilter="linear")
 
     strich, bericht = strich_maske_aus_ansichten(plotter, fein, diagnose_ordner)
+
     if not strich.any():
         return None, bericht
 
-    return _flaeche_aus_faces(fein, strich), bericht
+    #Pruefen, ob der Strich den Finger in zwei Teile teilt. Wenn ja, das
+    # Teil mit weniger Randkanten als das andere nehmen und den Strich wieder dazu fügen.
+    inneres_teil = _split_finger_teile(fein, strich)
+  
+    return inneres_teil, bericht
+  
+
+    
 
 
-def _flaeche_aus_faces(fein, strich):
-    dreiecke = fein.faces.reshape(-1, 4)[:, 1:][strich]
-    vtk_faces = np.hstack([np.full((len(dreiecke), 1), 3), dreiecke])
-    return p_v.PolyData(fein.points, vtk_faces).clean()
