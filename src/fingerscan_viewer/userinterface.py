@@ -88,6 +88,7 @@ from ui_unterklassen.patientenverwaltung.untersuchungs_dialog import (
     UntersuchungDialog,
     op_bezug)
 from ui_unterklassen.patientenverwaltung.blase import IconBlase
+from ui_unterklassen.patientenverwaltung.loesch_dialog import LoeschDialog
 from ui_unterklassen.hauptmenue.oberflaeche import UI_Aufbau_Mixin
 from ui_unterklassen.titelbildschirm.titel_bildschirm import TitelBildschirm
 from ui_unterklassen.hilfe.anleitungfenster import AnleitungFenster
@@ -299,6 +300,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         root = Path(self.root_ordner)
         for patient_ordner in sorted(p for p in root.iterdir() if p.is_dir()):
+            # Der Papierkorb liegt neben den Patienten und ist kein, wird ignoreiert könnte aber vom User extern abgefragt werden.
+            if patient_ordner.name == k.PAPIERKORB_ORDNER:
+                continue
             # Stand merken, den die Spalte ab jetzt anzeigt, dagegen prueft
             # der Waechter. Fuer alle Patienten, nicht nur die beobachteten:
             # wer spaeter aufgeklappt wird, braucht den Vergleich auch.
@@ -803,6 +807,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 pikto.setIcon(QIcon(str(k.ICON_ORDNER / k.ICON_ZU_LABEL.get(typ_label, "hand.svg"))))
                 aktion = lambda pf=pfad: self._scan_laden_aus_pfad(pf)
             pikto.clicked.connect(lambda _, a=aktion: self._aus_blase_laden(a))
+            pikto.setContextMenuPolicy(Qt.CustomContextMenu)
+            pikto.customContextMenuRequested.connect(
+                lambda pos, p=pikto, pf=pfad, lab=typ_label, t=typen: self._scan_menue(p, pos, Path(pf), lab, t))
             knoepfe.append(pikto)
         return knoepfe
 
@@ -812,6 +819,102 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         if self._blase is not None:
             self._blase.close()
         QTimer.singleShot(0, aktion)
+
+    def _scan_menue(self, knopf, pos, scan_ordner, typ_label, typen):
+        stelle = knopf.mapToGlobal(pos)
+        QTimer.singleShot(0, lambda: self._scan_menue_zeigen(stelle, scan_ordner, typ_label, typen))
+
+    def _scan_menue_zeigen(self, stelle, scan_ordner, typ_label, typen):
+        menue = QMenu(self)
+        menue.addAction(f"{typ_label} löschen …",
+                    lambda: self.scan_loeschen(scan_ordner, typ_label, typen))
+        menue.exec(stelle)
+
+    def _papierkorb_ziel(self, scan_ordner):
+        #Unter dem Zeitstempel bleibt der Pfad ab dem Root-Ordner erhalten,
+        #also Patient/Typ/Scan. So sieht man im Dateimanager sofort, was das
+        #war, und kann es von Hand zurueckschieben.
+        root = Path(self.root_ordner)
+        try:
+            darunter = scan_ordner.resolve().relative_to(root.resolve())
+        except ValueError:
+            #Scan liegt ausserhalb des Root-Ordners, dann nur sein Name
+            darunter = Path(scan_ordner.name)
+
+        ziel = root / k.PAPIERKORB_ORDNER / time.strftime("%Y-%m-%d_%H-%M-%S") / darunter
+        #Zweimal derselbe Scan in derselben Sekunde ist unwahrscheinlich,
+        #aber ohne die Schleife wuerde der zweite IN den ersten geschoben
+        nummer = 2
+        while ziel.exists():
+            ziel = ziel.with_name(f"{ziel.name}_{nummer}")
+            nummer += 1
+        return ziel
+
+    def _loesch_art_abfragen(self, scan_ordner, typ_label):
+        #Gibt "papierkorb", "endgueltig" oder None bei Abbruch zurueck
+        return LoeschDialog(scan_ordner, typ_label, self).frage_stellen()
+
+    def scan_loeschen(self, scan_ordner, typ_label, typen):
+        art = self._loesch_art_abfragen(scan_ordner, typ_label)
+        if art is None:
+            print("Removing the scan was cancelled")
+            return
+
+        #Die untersuchung.json liegt nur beim Original. Wird das entfernt,
+        #verliert die Untersuchung Nummer und Zeitpunkt. Also vorher in einen
+        #Ordner kopieren, der bleibt.
+        angaben = scan_ordner / k.UNTERSUCHUNG_DATEI
+        if angaben.is_file():
+            #is_dir() ist noetig: typen ist der Stand von dem Moment, in dem
+            #die Blase gebaut wurde. Loescht man zwei Scans nacheinander, ohne
+            #die Blase zwischendurch zu schliessen, steht der schon geloeschte
+            #noch drin.
+            bleiben = [Path(pf) for pf in typen.values()
+                       if Path(pf).resolve() != scan_ordner.resolve() and Path(pf).is_dir()]
+            if bleiben:
+                try:
+                    shutil.copy2(angaben, bleiben[0] / k.UNTERSUCHUNG_DATEI)
+                    print(f"Examination data copied to {bleiben[0].name} before removing the scan")
+                except OSError as e:
+                    #Kein Grund abzubrechen: der Scan soll trotzdem weg, es
+                    #fehlen danach nur Nummer und Zeitpunkt
+                    print(f"Examination data could not be saved, the scan is removed anyway: {e}")
+            else:
+                print("This was the last scan of the examination, its number and date go with it")
+
+        #Vor dem Entfernen pruefen: danach laesst sich der Pfad nicht mehr
+        #sauber vergleichen
+        war_geladen = (self.aktueller_ordner is not None
+                       and Path(self.aktueller_ordner).resolve() == scan_ordner.resolve())
+
+        try:
+            if art == LoeschDialog.ENDGUELTIG:
+                shutil.rmtree(scan_ordner)
+                print(f"Scan deleted for good: {scan_ordner}")
+                meldung = f"Scan '{typ_label}' endgültig gelöscht."
+            else:
+                ziel = self._papierkorb_ziel(scan_ordner)
+                ziel.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(scan_ordner), str(ziel))
+                print(f"Scan moved to the trash: {ziel}")
+                meldung = f"Scan '{typ_label}' in den Papierkorb verschoben."
+        except OSError as e:
+            QMessageBox.warning(self, "Scan löschen", f"Entfernen fehlgeschlagen:\n{e}")
+            print(f"Removing the scan failed: {e}")
+            return
+
+        if war_geladen:
+            #Sonst zeigt aktueller_ordner auf einen Ordner, den es nicht mehr
+            #gibt, und der naechste Klick auf Einzeichnen laeuft ins Leere
+            self.aktueller_ordner = None
+            self.aktuelle_teile = None
+            self.aktuelles_hand_mesh = None
+            self.plotter.clear()
+            print("The removed scan was the loaded one, viewer cleared")
+
+        self.hinweis_label.setText(meldung)
+        self._nav_aktualisieren()
+
 
     def _patient_toggle(self, widgets):
         """widgets[0] ist der Untersuchungs-Container, der Rest (z.B. der

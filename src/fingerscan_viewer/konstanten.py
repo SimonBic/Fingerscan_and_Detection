@@ -421,3 +421,23 @@ MIN_FLAECHE_FACES = 200
 # Farbe, damit sie auseinanderzuhalten sind. Reihenfolge wie die
 # Nummerierung, Bereich 1 ist der groesste.
 BEREICH_FARBEN = ["red", "blue", "green", "magenta", "orange", "cyan"]
+
+
+# ---------- Papierkorb ----------
+
+# Geloeschte Scans landen hier statt im Papierkorb des Systems. Der
+# Root-Ordner darf auf einer externen Platte liegen, und ein Verschieben
+# ueber Dateisystemgrenzen waere ein Kopieren, das bei 50 MB je Scan dauert.
+# Ausserdem bleiben die Patientendaten so im Datenbereich und landen nicht
+# auf dem Schreibtisch, wo sie jemand uebersieht.
+# Darunter je Loeschvorgang ein Ordner mit Zeitstempel, und darin der Pfad
+# ab dem Root-Ordner, damit man einen Scan von Hand zurueckschieben kann.
+PAPIERKORB_ORDNER = "_geloeschte_scans"
+
+# Eigener Loesch-Dialog: QMessageBox ordnet die Knoepfe nach dem
+# Plattform-Stil an, dort liessen sich die zwei Loesch-Knoepfe nicht vom
+# Abbrechen absetzen.
+LOESCH_FENSTER_TITEL = "Scan löschen"
+LOESCH_FENSTER_BREITE = 520
+LOESCH_FENSTER_HOEHE = 400
+LOESCH_KNOPF_HOEHE = 42

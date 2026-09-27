@@ -11,6 +11,10 @@
 #    python debugfiles/zeichne_struktur.py --mit-naben       auch die Pfeile auf konstanten
 #    python debugfiles/zeichne_struktur.py --dot --hoch      von oben nach unten statt quer
 
+# cd /home/simonbichler/Arbeit/UKR/Code/repo/Fingerscan_and_Detection
+# python src/fingerscan_viewer/debugfiles/zeichne_struktur.py --dot > docs/struktur.dot
+# dot -Tpdf docs/struktur.dot -o docs/struktur.pdf
+
 import ast
 import sys
 from collections import defaultdict

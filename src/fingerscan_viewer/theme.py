@@ -27,6 +27,8 @@ QToolButton#patient_knopf {
     border-radius: 8px;
     font-size: 10px;
 }
+
+
 QToolButton#patient_knopf:hover { background: #E0E8F0; }
 /* Aussehen (Verlauf, blauer Rand, Hover) kommt vom allgemeinen
    QPushButton oben. Hier nur, was fuer die 80px Breite noetig ist -
@@ -82,6 +84,47 @@ QPushButton#terminal_knopf {
     padding: 0px;
     font-size: 10px;
     font-weight: bold;
+}
+
+/* Knoepfe im Loesch-Dialog: rot fuer die beiden Wege, die Daten entfernen,
+   gruen fuer den Rueckzieher. Hover und Pressed muessen hier mitstehen -
+   ein #id-Selektor schlaegt QPushButton:hover, sonst waere der Effekt weg.
+   Verlauf und Radius kommen weiter vom allgemeinen QPushButton oben. */
+QLabel#loesch_frage {
+    font-size: 16px;
+    font-weight: 600;
+}
+QLabel#loesch_erklaerung {
+    font-size: 13px;
+    color: #4B5563;
+}
+
+QPushButton#loeschen_knopf {
+    border-color: #C0392B;
+}
+QPushButton#loeschen_knopf:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #E6A29B, stop:1 #D98880);
+    color: #FFFFFF;
+}
+QPushButton#loeschen_knopf:pressed {
+    background-color: #C0392B;
+    color: #FFFFFF;
+    border-color: #922B21;
+}
+
+QPushButton#abbrechen_knopf {
+    border-color: #27AE60;
+}
+QPushButton#abbrechen_knopf:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #9BD7B2, stop:1 #7FC79C);
+    color: #FFFFFF;
+}
+QPushButton#abbrechen_knopf:pressed {
+    background-color: #27AE60;
+    color: #FFFFFF;
+    border-color: #1E8449;
 }
 
 QPushButton:hover {
