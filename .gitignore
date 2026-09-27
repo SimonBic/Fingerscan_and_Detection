@@ -19,3 +19,5 @@ overlay_*.png
 *_diffuse.png
 debugfiles/*.png
 src/fingerscan_viewer/debugfiles/*.png
+
+*.dot
