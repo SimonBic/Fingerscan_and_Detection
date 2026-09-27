@@ -293,7 +293,9 @@ def draw_circle_on_scan(mesh, plotter: p_v.Plotter, path: Path, status, bei_flae
                 print("Die Schleife konnte nicht auf den Scan projiziert werden.")
                 return
 
-            status["flaeche"] = flaeche
+            #Liste, weil der Stift-Weg mehrere Bereiche liefern kann.
+            #Von Hand gemalt ist es immer genau einer.
+            status["flaeche"] = [flaeche]
             print("Kreis geschlossen!")
 
             if bei_flaeche_fertig is None:

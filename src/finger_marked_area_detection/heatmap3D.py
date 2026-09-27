@@ -10,6 +10,8 @@ import re
 from draw_area_on_scan import (
     lese_markierungsfarbe,
     extract_faces_of_hand)
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 import konstanten as k
 
 
@@ -66,6 +68,37 @@ def lade_markierung(obj_pfad: Path) -> np.ndarray:
         return np.vstack(alle_punkte)
 
     return geladen.vertices
+
+
+def bereiche_in_markierung(scan_ordner: Path) -> int:
+    #Zaehlt, aus wie vielen getrennten Stuecken die gespeicherte
+    #Markierung eines Scans besteht. Die Heatmaps rechnen bisher mit
+    #genau einem, deshalb wird damit vorher geprueft.
+    patienten_ordner = scan_ordner.parent.parent
+    name = scan_ordner.name
+    for obj_pfad in finde_markierte_scans(patienten_ordner):
+        if not obj_pfad.parent.name.startswith(name):
+            continue
+        try:
+            punkte = lade_markierung(obj_pfad)
+        except ValueError:
+            continue
+        if len(punkte) == 0:
+            continue
+        wolke = p_v.PolyData(punkte)
+        #Ueber den Abstand gruppieren: die Stuecke liegen weit
+        #auseinander, innerhalb eines Stuecks sind die Punkte dicht
+        baum = cKDTree(punkte)
+        paare = baum.query_pairs(r=1.0, output_type="ndarray")
+        if len(paare) == 0:
+            return len(punkte)
+        n = len(punkte)
+        matrix = csr_matrix((np.ones(len(paare)), (paare[:, 0], paare[:, 1])), shape=(n, n))
+        anzahl, label = connected_components(matrix + matrix.T, directed=False)
+        #Winzige Splitter nicht mitzaehlen
+        groessen = np.bincount(label)
+        return int((groessen >= 20).sum())
+    return 0
 
 
 def finde_markierte_scans(patienten_ordner: Path) -> list:

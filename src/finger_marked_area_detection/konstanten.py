@@ -391,3 +391,12 @@ STRICH_DICKE_MM = 0.8
 # Kleinere Stuecke ziehen keine Bruecken nach sich: einzelne Fehlpixel
 # sollen den Strich nicht quer ueber den Finger verlaengern.
 MIN_STUECK_PIXEL = 30
+
+# Kleinere Gebiete sind keine eingezeichnete Flaeche, sondern Taschen
+# zwischen zwei dicht beieinander liegenden Strichteilen
+MIN_FLAECHE_FACES = 200
+
+# Vorschau mehrerer eingekreister Bereiche: jeder bekommt eine eigene
+# Farbe, damit sie auseinanderzuhalten sind. Reihenfolge wie die
+# Nummerierung, Bereich 1 ist der groesste.
+BEREICH_FARBEN = ["red", "blue", "green", "magenta", "orange", "cyan"]

@@ -110,7 +110,6 @@ Diese Software lädt, verarbeitet und berechnet Handscans. Erfahrungsgemäß hab
 | Grafik | 1 GB Grafikspeicher | dedizierte Karte mit 4 GB |
 | Prozessor | 2 Kerne, 2,5 GHz | 4 Kerne, > 3,5 GHz |
 | Festplatte | 10 GB frei | SSD mit 50 GB frei |
-| Bildschirm | 1600 × 900 | 1920 × 1080 |
 | Betriebssystem | Windows 10, macOS 12| Linux |
 
 

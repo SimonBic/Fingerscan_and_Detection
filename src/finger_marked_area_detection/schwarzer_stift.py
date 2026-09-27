@@ -302,45 +302,71 @@ def _flaeche_aus_faces(fein, strich):
     return p_v.PolyData(fein.points, vtk_faces).clean()
 
 def _split_finger_teile(fein_ganz, strich):
-    #Trennt den Finger in zwei Teile, das innere vom Strich und das aeussere.
-    #Prueft dann, welches Teil weniger Randkanten hat und fuegt den Strich
-    #wieder dazu.
+    #Trennt den Finger an den Strichen. Das aeussere Teil hat die meisten
+    #Randfaces, jedes eingekreiste Teil gehoert zu dem Strich, mit dem es
+    #die meisten Grenzvertices teilt. So sind auch mehrere eingezeichnete
+    #Bereiche moeglich.
+    #
+    #clean() ist Pflicht: das OBJ hat an jeder UV-Naht doppelte Punkte,
+    #ohne das Zusammenlegen findet connectivity 262 Gebiete statt einem.
     fein_ganz = fein_ganz.clean()
-    
-    finger_ohne_strich = fein_ganz.extract_cells(~strich).connectivity("all")
 
-    kennung = np.asarray(finger_ohne_strich.cell_data["RegionId"])
-    groessen = np.bincount(kennung)
+    finger_ohne_striche = fein_ganz.extract_cells(~strich).connectivity("all")
+    striche_ohne_finger = fein_ganz.extract_cells(strich).connectivity("all")
 
-    if len(groessen) < 2:
-        return None
+    kennung_finger = np.asarray(finger_ohne_striche.cell_data["RegionId"])
+    groessen_finger = np.bincount(kennung_finger)
+    if len(groessen_finger) < 2:
+        return []
 
-    erstes, zweites = np.argsort(groessen)[::-1][:2]
+    kennung_striche = np.asarray(striche_ohne_finger.cell_data["RegionId"])
 
-    groesstes_teil = finger_ohne_strich.extract_cells(kennung == erstes)
-    zweit_groesstes_teil = finger_ohne_strich.extract_cells(kennung == zweites)
+    #Winzige Gebiete gar nicht erst betrachten, das sind Taschen zwischen
+    #zwei dicht beieinander liegenden Strichteilen
+    kandidaten = {}
+    for nummer in np.flatnonzero(groessen_finger >= k.MIN_FLAECHE_FACES):
+        kandidaten[int(nummer)] = finger_ohne_striche.extract_cells(
+            kennung_finger == nummer).extract_surface(algorithm="dataset_surface")
 
-    rand_teile_groesstes_teil_anzahl = groesstes_teil.extract_feature_edges(boundary_edges=True,
-                                                                     feature_edges=False,
-                                                                     non_manifold_edges=False,
-                                                                     manifold_edges=False).n_cells
+    #Aussenteil ist das Gebiet mit den meisten Randfaces
+    max_edge_faces = -1
+    aussenteil = None
+    for nummer, teil in kandidaten.items():
+        anzahl_edge_faces = teil.extract_feature_edges(boundary_edges=True,
+                                                       feature_edges=False,
+                                                       non_manifold_edges=False,
+                                                       manifold_edges=False).n_cells
+        if anzahl_edge_faces > max_edge_faces:
+            max_edge_faces = anzahl_edge_faces
+            aussenteil = nummer
 
-    rand_teile_zweit_groesstes_teil_anzahl = zweit_groesstes_teil.extract_feature_edges(boundary_edges=True,
-                                                                     feature_edges=False,
-                                                                     non_manifold_edges=False,
-                                                                     manifold_edges=False).n_cells
+    eingekreiste_teile = []
+    for nummer_strich in range(int(kennung_striche.max()) + 1):
+        strich_teil = striche_ohne_finger.extract_cells(
+            kennung_striche == nummer_strich).extract_surface(algorithm="dataset_surface")
+        if strich_teil.n_points == 0:
+            continue
+        baum = cKDTree(strich_teil.points)
 
-    if rand_teile_groesstes_teil_anzahl < rand_teile_zweit_groesstes_teil_anzahl:
-        inneres_teil = groesstes_teil
-    else:
-        inneres_teil = zweit_groesstes_teil
+        max_grenzvertices = 0
+        innen_teil = None
+        for nummer, teil in kandidaten.items():
+            if nummer == aussenteil:
+                continue
+            #Gemeinsame Punkte zaehlen. Die Teile stammen aus demselben
+            #Mesh, deckungsgleiche Punkte liegen also exakt aufeinander.
+            grenzvertices = int((baum.query(teil.points, k=1)[0] < 1e-5).sum())
+            if grenzvertices > max_grenzvertices:
+                max_grenzvertices = grenzvertices
+                innen_teil = teil
 
-    #extract_surface, weil extract_cells ein UnstructuredGrid liefert. Das
-    #Speichern braucht spaeter reine Dreiecke als PolyData.
+        if innen_teil is not None:
+            eingekreiste_teile.append(innen_teil.merge(strich_teil))
 
-    innen = inneres_teil.extract_surface(algorithm="dataset_surface")
-    gesamtflaeche = innen.merge(_flaeche_aus_faces(fein_ganz, strich))
-    return gesamtflaeche.clean()
+    #Nach Groesse sortiert, damit die Nummerierung in der Excel-Liste und
+    #in der Anzeige immer dieselbe Reihenfolge hat
+    eingekreiste_teile.sort(key=lambda t: t.area, reverse=True)
+    return [teil.clean() for teil in eingekreiste_teile]
 
 
 # ---------- Hauptfunktion ----------
@@ -349,7 +375,7 @@ def markiere_strich(plotter, teile, diagnose_ordner=None):
     # Der ganze Ablauf 
     mit_bild = [(mesh, tex) for mesh, tex in teile if mesh.n_points]
     if not mit_bild:
-        return None, {}
+        return [], {}
 
     ganz = p_v.merge([mesh for mesh, _ in mit_bild]) if len(mit_bild) > 1 else mit_bild[0][0]
 
@@ -359,13 +385,13 @@ def markiere_strich(plotter, teile, diagnose_ordner=None):
     strich, bericht = strich_maske_aus_ansichten(plotter, fein, diagnose_ordner)
 
     if not strich.any():
-        return None, bericht
+        return [], bericht
 
-    #Pruefen, ob der Strich den Finger in zwei Teile teilt. Wenn ja, das
-    # Teil mit weniger Randkanten als das andere nehmen und den Strich wieder dazu fügen.
-    inneres_teil = _split_finger_teile(fein, strich)
-  
-    return inneres_teil, bericht
+    #Gibt eine Liste zurueck, ein Eintrag je eingekreistem Bereich, nach
+    #Groesse sortiert. Bei nur einem Kreis ist die Liste einelementig.
+    eingekreiste_teile = _split_finger_teile(fein, strich)
+    bericht["bereiche"] = len(eingekreiste_teile)
+    return eingekreiste_teile, bericht
   
 
     

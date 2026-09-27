@@ -94,6 +94,7 @@ from vermessung_speichern import (
     schreibe_ergebnis_liste,
     vermessungs_ordner)
 from heatmap3D import (
+    bereiche_in_markierung,
     baue_3d_genesungsverlauf,
     speichere_genesungsverlauf,
     finde_markierte_scans,
@@ -1095,7 +1096,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def setze_zeichnungs_status_zurueck(self):
         # Sonst bleibt nach einem abgebrochenen (nicht geschlossenen) Strich
         # das Ergebnis des vorherigen Zeichenvorgangs stehen
-        self.zeichnungs_status["flaeche"] = None
+        #Liste, weil mehrere Bereiche auf einmal eingekreist sein koennen.
+        #Nach Groesse sortiert, der erste Eintrag ist Bereich 1.
+        self.zeichnungs_status["flaeche"] = []
         self.zeichnungs_status["landmarken"] = None
         self.zeichnungs_status["punkte_eingezeichnet"] = None
 
@@ -1111,13 +1114,18 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.gezeichnete_flaeche = draw_main(str(self.aktueller_ordner), self.plotter, self.zeichnungs_status)
 
     def weiter_klick_malen(self):
-        if self.zeichnungs_status["flaeche"] is None:
+        if not self.zeichnungs_status["flaeche"]:
             self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
             return
 
-        flaecheninhalt, umfang = berechne_flaeche_und_umfang(
-            self.zeichnungs_status["flaeche"], self.zeichnungs_status["punkte_eingezeichnet"])
-        self.hinweis_label.setText(f"Fläche: {flaecheninhalt:.1f} mm² | Umfang: {umfang:.1f} mm")
+        messwerte = self._messwerte_je_bereich()
+        if len(messwerte) == 1:
+            m = messwerte[0]
+            self.hinweis_label.setText(
+                f"Fläche: {m['flaeche_mm2']:.1f} mm² | Umfang: {m['umfang_mm']:.1f} mm")
+        else:
+            teile = "  ".join(f"{m['nummer']}: {m['flaeche_mm2']:.0f} mm²" for m in messwerte)
+            self.hinweis_label.setText(f"{len(messwerte)} Bereiche  |  {teile}")
         self.malen_wahl_container.setVisible(False)
 
         # Nur noch der Einzeichnen-Weg landet hier; das Vermessen laeuft
@@ -1126,15 +1134,55 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.farbe_wahl_container.setVisible(True)
         self.navigatecontainer.setVisible(True)
 
+    def _heatmap_moeglich(self):
+        #Die Heatmaps rechnen noch mit genau einer Flaeche je Scan. Solange
+        #das so ist, wird bei mehreren eingekreisten Bereichen abgelehnt,
+        #statt stillschweigend einen davon zu nehmen.
+        anzahl = bereiche_in_markierung(Path(self.aktueller_ordner))
+        if anzahl > 1:
+            self.hinweis_label.setText(
+                f"Die Markierung hat {anzahl} getrennte Bereiche. Die Heatmap kann "
+                "bisher nur einen, das kommt spaeter.")
+            return False
+        return True
+
+    def _messwerte_je_bereich(self):
+        #Flaeche und Umfang je eingekreistem Bereich, durchnummeriert.
+        #Die Liste ist schon nach Groesse sortiert, Bereich 1 ist der
+        #groesste.
+        messwerte = []
+        for nummer, flaeche in enumerate(self.zeichnungs_status["flaeche"], start=1):
+            flaecheninhalt, umfang = berechne_flaeche_und_umfang(
+                flaeche, self.zeichnungs_status["punkte_eingezeichnet"])
+            messwerte.append({"nummer": nummer, "flaeche": flaeche,
+                              "flaeche_mm2": flaecheninhalt, "umfang_mm": umfang})
+        return messwerte
+
+    def _schreibe_markierungs_liste(self, gespeicherter_pfad):
+        #Excel-Liste neben das gespeicherte OBJ, also in den
+        #markierte_scans-Unterordner des Scans. Anders als beim Vermessen,
+        #wo die Listen eine Ebene hoeher nebeneinander liegen.
+        if gespeicherter_pfad is None:
+            return
+        ordner = Path(gespeicherter_pfad).parent
+        schreibe_ergebnis_liste(self._messwerte_je_bereich(), ordner, ordner.name)
+
     def farbenwahl(self, farbe: str):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Kein Scan geladen.")
             return
-        if self.zeichnungs_status["flaeche"] is None:
+        if not self.zeichnungs_status["flaeche"]:
             self.hinweis_label.setText("Noch keine Fläche gezeichnet")
             return
 
-        save_drawn_area(self.zeichnungs_status["flaeche"], Path(self.aktueller_ordner), farbe, self.zeichnungs_status["landmarken"])
+        #Alle Bereiche in ein Mesh, das OBJ bleibt damit eine Datei
+        gesamt = self.zeichnungs_status["flaeche"][0]
+        for weiteres in self.zeichnungs_status["flaeche"][1:]:
+            gesamt = gesamt.merge(weiteres)
+
+        gespeichert = save_drawn_area(gesamt, Path(self.aktueller_ordner), farbe,
+                                      self.zeichnungs_status["landmarken"])
+        self._schreibe_markierungs_liste(gespeichert)
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.farbe_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
@@ -1160,50 +1208,37 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
         try:
-            flaeche, bericht = markiere_strich(
+            flaechen, bericht = markiere_strich(
                 self.plotter, self.aktuelle_teile,
                 diagnose_ordner=k.ANSICHT_DIAGNOSE_ORDNER)
         finally:
             QApplication.restoreOverrideCursor()
-        if flaeche is None or flaeche.n_points == 0:
+
+        if not flaechen:
             self.hinweis_label.setText(
                 "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
                 f"{k.ANSICHT_DIAGNOSE_ORDNER}.")
             return
 
-        flaeche.point_data["Selection"] = self._selection_fuer_flaeche(flaeche)
-
-        self.plotter.add_mesh(flaeche, color="red", opacity=0.5)
-        self.plotter.render()
-
-        gesehen = bericht.get("gesehen", 0)
-        faces = bericht.get("faces", 1)
-        self.hinweis_label.setText(
-            f"Strich markiert: {flaeche.area:.0f} mm². "
-            f"{gesehen} von {faces} Flaechenstuecken waren fuer eine Kamera sichtbar. "
-            f"Ansichten zum Nachsehen: {k.ANSICHT_DIAGNOSE_ORDNER}")
-
-        self.zeichnungs_status["flaeche"] = flaeche
+        self.zeichnungs_status["flaeche"] = flaechen
         self.zeichnungs_status["landmarken"] = {}
         self.zeichnungs_status["punkte_eingezeichnet"] = None
+
+        #Jeden Bereich einzeln einfaerben, damit man sie auseinanderhalten
+        #kann. Die Reihenfolge entspricht der Nummerierung in der Liste.
+        for nummer, flaeche in enumerate(flaechen):
+            farbe = k.BEREICH_FARBEN[nummer % len(k.BEREICH_FARBEN)]
+            self.plotter.add_mesh(flaeche, color=farbe, opacity=0.5)
+        self.plotter.render()
+
+        messwerte = self._messwerte_je_bereich()
+        teile_text = "  ".join(f"{m['nummer']}: {m['flaeche_mm2']:.0f} mm²" for m in messwerte)
+        self.hinweis_label.setText(
+            f"{len(messwerte)} Bereich(e) erkannt.  {teile_text}.  Jetzt die Farbe waehlen.")
+
         self.malen_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(False)
         self.farbe_wahl_container.setVisible(True)
-
-    def _selection_fuer_flaeche(self, flaeche):
-        # Baut das Skalarfeld nach, das sonst vtkSelectPolyData liefert.
-        # umfang_der_schnittkante() zaehlt nur Randkanten, deren beide
-        # Enden nahe null liegen. ohne das Feld wuerden auch die Raender
-        # von Loechern im Scan mitgezaehlt und der Umfang faellt zu gross
-        # aus. Der urspruengliche Fingerrand zaehlt ebenfalls nicht mit.
-        selection = np.zeros(flaeche.n_points)
-        finger_rand = self.aktuelles_hand_mesh.extract_feature_edges(
-            boundary_edges=True, feature_edges=False,
-            non_manifold_edges=False, manifold_edges=False)
-        if finger_rand.n_points:
-            abstand = cKDTree(finger_rand.points).query(flaeche.points, k=1)[0]
-            selection[abstand <= k.RAND_ABSTAND_TOLERANZ] = -1.0
-        return selection
 
     def automatisch_einzeichnen_klick(self):
         if self.aktueller_ordner is None:
@@ -1566,6 +1601,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
             return
+        if not self._heatmap_moeglich():
+            return
         bild = heatmap_main(str(self.aktueller_ordner))
         if bild is None:
             self.hinweis_label.setText("Keine markierten Scans für diesen Patienten gefunden.")
@@ -1585,6 +1622,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def genesungsverlauf_3d_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            return
+        if not self._heatmap_moeglich():
             return
 
         scan_ordner = Path(self.aktueller_ordner)
