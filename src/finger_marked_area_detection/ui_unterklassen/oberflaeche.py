@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher
 from PySide6.QtWidgets import (
     QWidget,
@@ -19,7 +17,6 @@ from pyvistaqt import QtInteractor
 import konstanten as k
 from farbauswahl_widget import FarbAuswahlWidget
 from ui_unterklassen.hinweis_label import HinweisLabel, HinweisBereich
-from ui_unterklassen.titel_bildschirm import AnleitungFenster
 
 
 class UI_Aufbau_Mixin:
@@ -160,16 +157,29 @@ class UI_Aufbau_Mixin:
         self.knopf_layout.addWidget(self.navigatecontainer)
         self.navigatecontainer.setVisible(False)
 
-        # --- Fragezeichen unten links ---
+        # --- Fragezeichen, Terminal unten links ---
         
         self.knopf_layout.addStretch(1)
         hilfe_zeile = QHBoxLayout()
+
         self.knopf_hilfe = QPushButton(k.HILFE_KNOPF_TEXT)
+        self.terminal_knopf = QPushButton(">_")
+
         self.knopf_hilfe.setObjectName("hilfe_knopf")
+        self.terminal_knopf.setObjectName("terminal_knopf")
+
         self.knopf_hilfe.setFixedSize(k.HILFE_KNOPF_GROESSE, k.HILFE_KNOPF_GROESSE)
+        self.terminal_knopf.setFixedSize(k.HILFE_KNOPF_GROESSE, k.HILFE_KNOPF_GROESSE)
+
         self.knopf_hilfe.setToolTip(k.HILFE_KNOPF_HILFE)
+        self.terminal_knopf.setToolTip("Hier sind die Terminalausgaben der Software nachzulesen")
+
         self.knopf_hilfe.clicked.connect(self.zeige_anleitung)
+        self.terminal_knopf.clicked.connect(self.zeige_terminal_ausgabe)
+
         hilfe_zeile.addWidget(self.knopf_hilfe)
+        hilfe_zeile.addWidget(self.terminal_knopf)
+
         hilfe_zeile.addStretch()
         self.knopf_layout.addLayout(hilfe_zeile)
 

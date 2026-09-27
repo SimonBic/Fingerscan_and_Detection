@@ -3,7 +3,6 @@ import numpy as np
 from pathlib import Path
 
 import trimesh
-from scipy.spatial import cKDTree
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from PIL import Image

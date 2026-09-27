@@ -76,6 +76,14 @@ QPushButton#hilfe_knopf {
     font-weight: bold;
 }
 
+QPushButton#terminal_knopf {
+    
+    border-radius: 6px;
+    padding: 0px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
 QPushButton:hover {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                                  stop:0 #9CBFE2, stop:1 #7FA5C9);
@@ -176,6 +184,18 @@ QTextBrowser#howto_inhalt {
 QLabel#howto_titel {
     font-size: 32px;
     font-weight: 600;
+}
+
+/* Die Logansicht liegt in derselben Karte wie die Anleitung, soll aber als
+   Textfeld erkennbar sein - deshalb hier ein eigener Rahmen und Hintergrund */
+QPlainTextEdit#terminal_inhalt {
+    background: #FFFFFF;
+    border: 1px solid #D8DEE6;
+    border-radius: 8px;
+    padding: 8px;
+    color: #1F2937;
+    selection-background-color: #4A90D9;
+    selection-color: #FFFFFF;
 }
 
  QScrollBar:vertical {

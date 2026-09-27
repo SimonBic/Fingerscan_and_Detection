@@ -2,7 +2,6 @@ from pathlib import Path
 import numpy as np
 import trimesh
 import pyvista as p_v
-import matplotlib.pyplot as plt
 from PIL import Image
 from scipy.spatial import cKDTree
 import re

@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import konstanten as k
 from farberkennung import (
     finde_markierungs_punkte,
-    hex_zu_rgb,
     kleinster_farbabstand,
     medianer_texelabstand,
     schwelle_aus_verteilung,

@@ -1,13 +1,10 @@
 
-import sys
 import shutil
 import json
 import time
-from matplotlib import container
 import pyvista as p_v
 import vtk
 import numpy as np
-from scipy.spatial import cKDTree
 from pathlib import Path
 from collections import defaultdict
 
@@ -20,44 +17,28 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QGridLayout,
     QPushButton, 
-    QLineEdit,
     QDialog,
     QFileDialog,
-    QDialogButtonBox,
     QInputDialog,
     QMessageBox,
-    QSpinBox,
-    QComboBox,
-    QFormLayout,
     QMenu,
     QToolButton,
     QTableWidget,
     QTableWidgetItem,
-    QHeaderView,
-    QGraphicsDropShadowEffect)
+    QHeaderView)
 from PySide6.QtCore import (
     Qt,
     QEvent,
     QSize,
     QSettings,
     QUrl,
-    QTimer,
-    QPoint,
-    QPointF,
-    QRectF,
-    QVariantAnimation,
-    QEasingCurve,
-    Signal)
+    QTimer)
 from PySide6.QtGui import (
     QIcon,
     QCursor,
     QDesktopServices,
-    QPixmap,
-    QPainter,
-    QColor,
-    QPen)
+    QPixmap)
 
-from theme import QSS
 from utils import generator_bis_ende
 from farberkennung import (
     finde_markierungs_punkte,
@@ -95,26 +76,22 @@ from vermessung_speichern import (
     vermessungs_ordner)
 from heatmap3D import (
     bereiche_in_markierung,
-    baue_3d_genesungsverlauf,
     speichere_genesungsverlauf,
     finde_markierte_scans,
     lade_markierung,
     finde_nagel_normale,
     rotationsmatrix_um_z_fuer_nagel_ausrichtung,
     isolierte_scan_name_aus_markierung,
-    baue_farbgruppen_aus_gewinner,
     farb_prioritaet)
 from heatmap2D import heatmap_main
-from ui_unterklassen.hinweis_label import (
-    HinweisBereich)
 from ui_unterklassen.untersuchungs_dialog import (
     UntersuchungDialog,
     op_bezug)
 from ui_unterklassen.blase import IconBlase
 from ui_unterklassen.oberflaeche import UI_Aufbau_Mixin
-from ui_unterklassen.titel_bildschirm import (
-    TitelBildschirm, 
-    AnleitungFenster)
+from ui_unterklassen.titel_bildschirm import TitelBildschirm
+from ui_unterklassen.anleitungfenster import AnleitungFenster
+from ui_unterklassen.terminal_fenster import TerminalFenster
 from ui_unterklassen.root_ordner_dialog import root_ordner_waehlen
 import konstanten as k
 
@@ -157,6 +134,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.genesungsverlauf_aktuell_rotiert = None
         self._genesungsverlauf_mesh_fuer_klick = None
         self._anleitung_fenster = None
+        self._terminal_fenster = None
 
         # Zuerst der Title Screen im selben Fenster. Die eigentliche Oberflaeche
         # (mit dem teuren VTK-Viewer) entsteht erst bei "Software starten" -
@@ -201,6 +179,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self._anleitung_fenster = AnleitungFenster(self)
         self._anleitung_fenster.zeige()
 
+    def zeige_terminal_ausgabe(self):
+        # Zeigt dem User die Terminalausgabe. Wie bei der Anleitung einmal
+        # bauen und behalten, so bleibt die Scrollposition erhalten.
+        if self._terminal_fenster is None:
+            self._terminal_fenster = TerminalFenster(self)
+        self._terminal_fenster.zeige()
+
     # ---------- Drag & Drop / Laden / Einstellungen ----------
 
     def dragEnterEvent(self, event):
@@ -241,6 +226,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self._rendere_teile(self.aktuelle_teile)
 
     def lade_main_menu(self):
+
         self.haupt_buttons_container.setVisible(True)
         self.isolieren_wahl_container.setVisible(False)
         self.malen_wahl_container.setVisible(False)
@@ -257,15 +243,17 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self._pipette_aktiv = False
         self.plotter.interactor.removeEventFilter(self)
         self.plotter.interactor.unsetCursor()
+        print("Main Menu loaded succesfully")
 
     def einstellungen_oeffnen(self):
-        # Zahnrad in der laufenden Software - gleicher Dialog wie auf dem Title Screen
+        # Zahnrad in der laufenden Software, gleicher Dialog wie auf dem Title Screen
         pfad = root_ordner_waehlen(self, self.root_ordner)
         if pfad is None:
             return
         self.root_ordner = pfad
         self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, pfad)
         self._root_ordner_anwenden()
+        print("settings loaded succesfully.")
 
     def _root_ordner_anwenden(self):
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
@@ -306,6 +294,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self._angezeigte_signaturen = {}
 
         if not self.root_ordner or not Path(self.root_ordner).is_dir():
+            print("Navigationcolumn did not load, path is not a directory or path not found.")
             return
 
         root = Path(self.root_ordner)
@@ -322,13 +311,14 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         self._neuer_patient_knopf_bauen()
         self._patienten_beobachten()
+        print("Navigationcolumn loaded succesfully. ")
 
 
     # ---------- Nav-Spalte aktuell halten ----------
 
     def _nav_aktualisieren(self):
         #neu aufbauen die navsplte, und den aktuellen pat und scrollstelle etc gleich lassen
-        # Eine offene Icon-Blase wird bewusst NICHT wieder aufgemacht - sie
+        # Eine offene Icon-Blase wird bewusst nicht wieder aufgemacht, sie
         # wuerde sonst nach jedem Speichern unvermittelt aufploppen.
         patient = self._offener_patient_name
         scroll = self.nav_spalte.verticalScrollBar().value()
@@ -340,7 +330,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         QTimer.singleShot(0, lambda: self.nav_spalte.verticalScrollBar().setValue(scroll))
 
     def _patient_signatur(self, patient_ordner):
-        #Alles, was die Nav-Spalte von einem Patienten anzeigt. Aendert
+        #Alles, was die Nav-Spalte von einem Patienten anzeigt. ändert
         #sich das, muss neu gebaut werden
         struktur = self._untersuchungen_sammeln(patient_ordner) if patient_ordner.is_dir() else {}
         return (
@@ -443,12 +433,14 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 (patient_ordner / typ).mkdir()
         except OSError as e:
             QMessageBox.warning(self, "Neuer Patient", f"Ordner konnte nicht angelegt werden:\n{e}")
+            print(f"create patient failed, directory could not be created:\n{e}")
             return
 
         self.baum_neu_aufbauen()
         if name in self._patient_aufklapp_widgets:
             self._patient_toggle(self._patient_aufklapp_widgets[name])
         self.hinweis_label.setText(f"Patient '{name}' angelegt.")
+        print("Patient created succesfully")
 
     @staticmethod
     def _ordner_name_pruefen(eltern, name):
@@ -476,6 +468,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             str(Path.home()),
             "Scan-Dateien (*.obj *.mtl *.png *.jpg *.jpeg);;Alle Dateien (*)")
         if not dateien:
+            print("no data found while creating new scan")
             return
         dateien = [Path(d) for d in dateien]
 
@@ -485,6 +478,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 self, "Scan unvollständig",
                 "Der Scan kann so nicht hinzugefügt werden:\n\n"
                 + "\n".join(f"•  {f}" for f in fehler))
+            print(f"Missing data in scan" + "\n".join(f"•  {f}" for f in fehler))
             return
 
         # Nummer, Zeit nach OP und Ordnername abfragen
@@ -497,6 +491,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                                     or self._scan_name_pruefen(ordner)),
             ordnername="")
         if dialog.exec() != QDialog.Accepted:
+            print("Data while creating new scna was not accepted")
             return
         name = dialog.ordner()
 
@@ -506,11 +501,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             for d in dateien:
                 shutil.copy2(d, ziel / d.name)
             self._meta_schreiben(ziel, dialog.meta())
+            print("New scan created succesfully")
         except OSError as e:
-            # halb kopierten Ordner nicht liegen lassen - der wuerde sonst
+            # halb kopierten Ordner nicht liegen lassen , der wuerde sonst
             # als kaputte Untersuchung in der Nav-Spalte auftauchen
             shutil.rmtree(ziel, ignore_errors=True)
             QMessageBox.warning(self, "Neuer Scan", f"Kopieren fehlgeschlagen:\n{e}")
+            print(f"Copying data for new scan failed {e}")
             return
 
         self._nav_aktualisieren()
@@ -526,14 +523,19 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         if not objs:
             fehler.append("Es fehlt die .obj-Datei (das 3D-Modell).")
+            print("no .obj file found")
         elif len(objs) > 1:
             fehler.append(f"Mehrere .obj-Dateien ausgewählt ({', '.join(d.name for d in objs)}) – bitte nur eine.")
+            print("too many .obj file, maximum 1")
         if not mtls:
             fehler.append("Es fehlt die .mtl-Datei (die Materialbeschreibung).")
+            print("no .mtl file found")
         elif len(mtls) > 1:
             fehler.append(f"Mehrere .mtl-Dateien ausgewählt ({', '.join(d.name for d in mtls)}) – bitte nur eine.")
+            print("too many .mtl files, maximum 1")
         if not bilder:
             fehler.append("Es fehlt mindestens ein Texturbild (.png oder .jpg).")
+            print("no texture found, please add at least 1")
 
         # Passen die Dateien auch zusammen? Die .obj nennt ihre .mtl, die
         # .mtl nennt ihre Bilder - fehlt eins davon, laedt der Scan ohne Textur.
@@ -573,7 +575,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # mit so einem Namen wuerde falsch einsortiert.
         for endung in ("_isoliert", "_marked", "_vermessen", "_genesungsverlauf"):
             if name.endswith(endung):
-                return f"Der Name darf nicht auf '{endung}' enden – das ist für bearbeitete Scans reserviert."
+                print("all filenames created by users cannot end with _isoliert, _marked, _vermessen or _genesungsverlauf")
+                return f"Der Name darf nicht auf '{endung}' enden das ist für bearbeitete Scans reserviert."
         return None
 
     def _untersuchungen_sammeln(self, patient_ordner):
@@ -597,9 +600,12 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def _meta_ordner(typen):
         """Wo die Angaben einer Untersuchung liegen: im Original-Scan, und
         falls es keinen gibt, im ersten vorhandenen Scan dieser Untersuchung."""
-        return Path(typen.get("original") or next(iter(typen.values())))
+        try:
+            return Path(typen.get("original") or next(iter(typen.values())))
+        except:
+            print("Meta not found")
 
-    @classmethod
+    @classmethod    
     def _untersuchung_meta(cls, typen):
         for ordner in [cls._meta_ordner(typen), *map(Path, typen.values())]:
             datei = ordner / k.UNTERSUCHUNG_DATEI
@@ -614,6 +620,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def _meta_schreiben(ordner, meta):
         (Path(ordner) / k.UNTERSUCHUNG_DATEI).write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"Meta data {meta} written in {ordner}")
 
     def _nummer_pruefen(self, patient_ordner, nummer, ausser_basis=None):
         """Fehlertext, wenn die Nummer bei diesem Patienten schon vergeben ist."""
@@ -690,6 +697,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         patient_knopf.clicked.connect(
             lambda _, w=aufklapp_widgets: self._patient_toggle(w)
         )
+        print(f"Patient {patient_name} added to the navigation column with {len(struktur)} examinations")
 
     @staticmethod
     def _neuester_genesungsverlauf(patient_ordner):
@@ -745,6 +753,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             u_knopf = QPushButton(f"U{nummer} · {knopf_text}\n{zeit}")
         else:
             u_knopf = QPushButton("U?\nohne Angabe")
+            print(f"Examination {basis} has no number and no time saved, listed as unknown")
         u_knopf.setObjectName("untersuchung_knopf")
         u_knopf.setFixedWidth(k.NAV_KNOPF_BREITE)
         if nummer and zeit:
@@ -773,6 +782,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         blase.geschlossen.connect(lambda kn=knopf: self._blase_geschlossen(kn))
         self._blase = blase
         blase.zeigen()
+        print(f"Examination opened, {len(typen)} scan types available: {', '.join(typen)}")
 
     def _blase_geschlossen(self, knopf):
         self._blase = None
@@ -820,6 +830,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         if oeffnen:
             # Was sich getan hat, waehrend der Patient zu (= unbeobachtet) war
             self._waechter_timer.start()
+            print(f"Patient {self._offener_patient_name} expanded")
+        else:
+            print("Patient collapsed")
 
     def _untersuchung_menue(self, knopf, pos, patient_ordner, basis, typen):
         menue = QMenu(knopf)
@@ -838,12 +851,15 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self, f"Untersuchung bearbeiten – {basis}", meta,
             lambda nummer, _: self._nummer_pruefen(patient_ordner, nummer, ausser_basis=basis))
         if dialog.exec() != QDialog.Accepted:
+            print("Editing the examination data was cancelled")
             return
         try:
             self._meta_schreiben(self._meta_ordner(typen), dialog.meta())
         except OSError as e:
             QMessageBox.warning(self, "Untersuchung bearbeiten", f"Speichern fehlgeschlagen:\n{e}")
+            print(f"Writing the examination data failed {e}")
             return
+        print(f"Examination data of {basis} updated")
         self._nav_aktualisieren()
 
     def _naechste_nummer(self, patient_ordner):
@@ -856,8 +872,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         """Vermessenen Scan laden und, falls vorhanden, die Ergebnisliste zeigen."""
         self._scan_laden_aus_pfad(pfad)
         liste = self._vermessungs_liste_finden(Path(pfad))
-        if liste is not None:
-            self._ergebnis_liste_zeigen(liste)
+        if liste is None:
+            print("No result list found next to this measured scan")
+            return
+        self._ergebnis_liste_zeigen(liste)
 
     def _vermessungs_liste_finden(self, scan_ordner):
         # schreibe_ergebnis_liste() legt die Liste neben den Scan-Ordner
@@ -874,6 +892,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             from openpyxl import load_workbook
         except ImportError:
             # ohne openpyxl wenigstens im Standardprogramm oeffnen
+            print("openpyxl is not installed, opening the result list in the default program instead")
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(xlsx_pfad)))
             return
 
@@ -899,12 +918,14 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         fenster.resize(420, 320)
         fenster.show()
+        print(f"Result list {xlsx_pfad.name} shown with {len(zeilen)} rows")
 
     def _bild_zeigen(self, png_pfad):
         """Zeigt ein gespeichertes Bild (2D-Heatmap) in einem Nebenfenster."""
         bild = QPixmap(str(png_pfad))
         if bild.isNull():
             self.hinweis_label.setText(f"Bild konnte nicht geladen werden:\n{png_pfad}")
+            print(f"Image could not be loaded from {png_pfad}")
             return
 
         fenster, layout = self._neben_fenster(Path(png_pfad).parent.parent.name + " - 2D-Heatmap")
@@ -920,6 +941,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         fenster.adjustSize()
         fenster.show()
+        print(f"Image {Path(png_pfad).name} shown next to the viewer")
 
     def _neben_fenster(self, titel):
         """Nicht-modales Fenster neben dem Viewer (Excel-Liste, Heatmap), damit
@@ -945,8 +967,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         ordner = Path(pfad)
         if not ordner.is_dir():
             self.hinweis_label.setText("Scan-Ordner existiert nicht mehr.")
+            print(f"Scan folder does not exist anymore: {ordner}")
             return
         self.aktueller_ordner = ordner
+        print(f"Loading scan from {ordner}")
         self.lade_und_zeige(ordner)
 
     # ---------- Finger isolieren ----------
@@ -954,7 +978,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def isolieren_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Finger isolation needs a loaded scan")
             return
+        print("Finger isolation started, choose automatic or manual settings")
         self.zeige_basis_mesh_neu()
         self.button_automatisch.setVisible(True)
         self.button_manuell.setVisible(True)
@@ -971,14 +997,17 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         gespeichert = lade_isolate_finger_parameter(ordner)
 
         if gespeichert:
+            print(f"Automatic isolation, using the parameters saved for this patient: {gespeichert}")
             self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False, **gespeichert)
         else:
+            print("Automatic isolation, no parameters saved yet for this patient, using the defaults")
             self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False)
 
         self.automatisch_modus_aktiv = True
         self.button_weiter.setText("Fertig markiert")
         self.button_weiter.setVisible(True)
         next(self.isolieren_ablauf)
+        print("Right click the hurt fingertip, then the neighbouring fingertip")
 
     def manuell_klick(self):
         self.button_automatisch.setVisible(False)
@@ -989,6 +1018,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.button_weiter.setVisible(True)
         self.navigatecontainer.setVisible(True)
         next(self.isolieren_ablauf)
+        print("Manual isolation started, right click the hurt fingertip, then the neighbouring fingertip")
 
     def weiter_klick(self):
         self.navigatecontainer.setVisible(False)
@@ -996,16 +1026,19 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.automatisch_modus_aktiv = False
             self.button_weiter.setText("Weiter")
             self.button_weiter.setVisible(False)
+            print("Isolating the finger, this takes a moment")
             try:
                 gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)
                 self.aktueller_ordner = Path(gespeicherter_obj_pfad)
             except Exception as e:
                 self.hinweis_label.setText(f"Fehler: {e}")
+                print(f"Isolating the finger failed: {e}")
                 self.isolieren_wahl_container.setVisible(False)
                 self.haupt_buttons_container.setVisible(True)
                 return
             self.isolieren_wahl_container.setVisible(False)
             self.haupt_buttons_container.setVisible(True)
+            print(f"Isolated finger saved in {gespeicherter_obj_pfad}")
             self.lade_und_zeige(Path(gespeicherter_obj_pfad))
             return
 
@@ -1015,6 +1048,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.ellipsoid_kontext = next(self.isolieren_ablauf)
             self.ellipsoid_einstellen_container.setVisible(True)
             self.aktualisiere_ellipsoid_vorschau()
+            print("Fingertips accepted, now adjust the cutting ellipsoid with the sliders")
             return
 
         try:
@@ -1023,6 +1057,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.button_weiter.setVisible(False)
             self.isolieren_wahl_container.setVisible(False)
             self.haupt_buttons_container.setVisible(True)
+            print("Isolation workflow finished")
 
     def aktualisiere_ellipsoid_vorschau(self):
         if self.aktueller_ellipsoid_actor is not None:
@@ -1049,6 +1084,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.ellipsoid_kontext["verwendete_vertices"] = verwendete_vertices
             self.ellipsoid_kontext["avg_point_of_hurt_finger"] = avg_point_of_hurt_finger
             self.ellipsoid_kontext["pca_radius"] = pca_radius
+            print(f"PCA radius set to {pca_radius:.0f} mm, {len(verwendete_vertices)} points used for the finger normal")
 
         self.label_pca_radius.setText(
             f"Achsen-Radius: {pca_radius:.0f} mm "
@@ -1076,10 +1112,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.ellipsoid_einstellen_container.setVisible(False)
         self.navigatecontainer.setVisible(False)
         speichere_isolate_finger_parameter(ordner, **werte)
+        print(f"Ellipsoid confirmed and saved for the next isolation of this patient: {werte}")
+        print("Cutting the finger out, this takes a moment")
 
         try:
             self.isolieren_ablauf.send(werte)
             self.hinweis_label.setText("Unerwarteter weiterer Zwischenschritt - bitte melden.")
+            print("Unexpected extra step in the isolation workflow, nothing was saved")
             return
         except StopIteration as e:
             gespeicherter_obj_pfad = e.value
@@ -1089,6 +1128,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.isolieren_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)
 
+        print(f"Isolated finger saved in {gespeicherter_obj_pfad}")
         self.lade_und_zeige(Path(gespeicherter_obj_pfad))
 
     # ---------- Zeichnen ----------
@@ -1105,7 +1145,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def zeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Drawing an area needs a loaded scan")
             return
+        print("Drawing started, right click to set points and close the loop on the first point")
         self.setze_zeichnungs_status_zurueck()
         self.navigatecontainer.setVisible(True)
         self.haupt_buttons_container.setVisible(False)
@@ -1116,9 +1158,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def weiter_klick_malen(self):
         if not self.zeichnungs_status["flaeche"]:
             self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
+            print("No area drawn yet, nothing to continue with")
             return
 
         messwerte = self._messwerte_je_bereich()
+        print(f"{len(messwerte)} area(s) drawn")
+        for m in messwerte:
+            print(f"   Area {m['nummer']}: {m['flaeche_mm2']:.1f} mm² surface, {m['umfang_mm']:.1f} mm perimeter")
         if len(messwerte) == 1:
             m = messwerte[0]
             self.hinweis_label.setText(
@@ -1136,13 +1182,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
     def _heatmap_moeglich(self):
         #Die Heatmaps rechnen noch mit genau einer Flaeche je Scan. Solange
-        #das so ist, wird bei mehreren eingekreisten Bereichen abgelehnt,
-        #statt stillschweigend einen davon zu nehmen.
+        #das so ist, wird bei mehreren eingekreisten Bereichen abgelehnt
         anzahl = bereiche_in_markierung(Path(self.aktueller_ordner))
         if anzahl > 1:
             self.hinweis_label.setText(
                 f"Die Markierung hat {anzahl} getrennte Bereiche. Die Heatmap kann "
-                "bisher nur einen, das kommt spaeter.")
+                "bisher nur einen verarbeiten, das kommt spaeter, falls nötig.")
+            print(f"Heatmap refused, the saved marking has {anzahl} separate areas and only one is supported so far")
             return False
         return True
 
@@ -1160,19 +1206,25 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
     def _schreibe_markierungs_liste(self, gespeicherter_pfad):
         #Excel-Liste neben das gespeicherte OBJ, also in den
-        #markierte_scans-Unterordner des Scans. Anders als beim Vermessen,
-        #wo die Listen eine Ebene hoeher nebeneinander liegen.
+        #markierte_scans-Unterordner des Scans. 
         if gespeicherter_pfad is None:
+            print("The marking was not saved, so no result list was written")
             return
         ordner = Path(gespeicherter_pfad).parent
-        schreibe_ergebnis_liste(self._messwerte_je_bereich(), ordner, ordner.name)
+        liste_pfad = schreibe_ergebnis_liste(self._messwerte_je_bereich(), ordner, ordner.name)
+        if liste_pfad is None:
+            print("Result list skipped, openpyxl is not installed")
+        else:
+            print(f"Result list of the marked areas written to {liste_pfad}")
 
     def farbenwahl(self, farbe: str):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Kein Scan geladen.")
+            print("Saving the marked area needs a loaded scan")
             return
         if not self.zeichnungs_status["flaeche"]:
             self.hinweis_label.setText("Noch keine Fläche gezeichnet")
+            print("No area drawn yet, nothing to save")
             return
 
         #Alle Bereiche in ein Mesh, das OBJ bleibt damit eine Datei
@@ -1180,8 +1232,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         for weiteres in self.zeichnungs_status["flaeche"][1:]:
             gesamt = gesamt.merge(weiteres)
 
+        print(f"Saving {len(self.zeichnungs_status['flaeche'])} marked area(s) in color {farbe}")
         gespeichert = save_drawn_area(gesamt, Path(self.aktueller_ordner), farbe,
                                       self.zeichnungs_status["landmarken"])
+        print(f"Marked scan saved in {gespeichert}")
         self._schreibe_markierungs_liste(gespeichert)
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.farbe_wahl_container.setVisible(False)
@@ -1191,6 +1245,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def stift_einzeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Pen detection needs a loaded scan")
             return
 
         # Nur am isolierten Finger: dort liegt die gesamte Textur, die
@@ -1200,9 +1255,11 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.hinweis_label.setText(
                 "Diese Funktion funktioniert nur am isolierten Finger. Bitte erst 'Finger isolieren' "
                 "(Punkt 4 der Anleitung).")
+            print("Pen detection only works on an isolated finger, isolate it first")
             return
 
         self.setze_zeichnungs_status_zurueck()
+        print("Looking for the black pen stroke, the viewer takes pictures from all sides and is locked while it does")
         self.hinweis_label.setText("Markierung wird gesucht ...")
         QApplication.processEvents()
 
@@ -1214,10 +1271,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+        print(f"{bericht.get('gesehen', 0)} of {bericht.get('faces', 0)} faces were visible in the views, "
+              f"{bericht.get('strich', 0)} of them look like the pen stroke")
         if not flaechen:
             self.hinweis_label.setText(
                 "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
                 f"{k.ANSICHT_DIAGNOSE_ORDNER}.")
+            print(f"No stroke found, the recorded views are in {k.ANSICHT_DIAGNOSE_ORDNER} for checking")
             return
 
         self.zeichnungs_status["flaeche"] = flaechen
@@ -1229,9 +1289,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         for nummer, flaeche in enumerate(flaechen):
             farbe = k.BEREICH_FARBEN[nummer % len(k.BEREICH_FARBEN)]
             self.plotter.add_mesh(flaeche, color=farbe, opacity=0.5)
+            print(f"   Area {nummer + 1} shown in {farbe}")
         self.plotter.render()
 
         messwerte = self._messwerte_je_bereich()
+        print(f"{len(messwerte)} area(s) found, sorted by size, area 1 is the biggest")
+        for m in messwerte:
+            print(f"   Area {m['nummer']}: {m['flaeche_mm2']:.1f} mm² surface, {m['umfang_mm']:.1f} mm perimeter")
         teile_text = "  ".join(f"{m['nummer']}: {m['flaeche_mm2']:.0f} mm²" for m in messwerte)
         self.hinweis_label.setText(
             f"{len(messwerte)} Bereich(e) erkannt.  {teile_text}.  Jetzt die Farbe waehlen.")
@@ -1243,23 +1307,31 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def automatisch_einzeichnen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Automatic drawing needs a loaded scan")
             return
 
         self.setze_zeichnungs_status_zurueck()
 
+        print(f"Looking for the color {self.einzeichnen_farbwahl.farbe} on the scan texture")
         markierte_punkte = finde_markierungs_punkte(
             self.aktuelle_teile, hex_code=self.einzeichnen_farbwahl.farbe, toleranz=100.0)
         if len(markierte_punkte) < 3:
             self.hinweis_label.setText("Keine ausreichende Markierung auf dem Scan gefunden.")
+            print(f"Only {len(markierte_punkte)} points match that color, at least 3 are needed")
             return
 
+        print(f"{len(markierte_punkte)} points match that color")
         markierte_punkte = entferne_ausreisser_punkte(markierte_punkte)
         pfad = baue_geschlossenen_pfad(markierte_punkte)
+        print(f"{len(markierte_punkte)} points left after dropping the outliers, path closed over {len(pfad)} points")
 
         flaeche = schneide_flaeche_aus_loop(self.aktuelles_hand_mesh, pfad)
         if flaeche is None:
             self.hinweis_label.setText("Markierung konnte nicht auf dem Scan geschlossen werden.")
+            print("The marking could not be closed into an area on the scan")
             return
+
+        print(f"Area cut out of the scan, {flaeche.n_cells} faces, now choose the color")
 
         self.zeichnungs_status["flaeche"] = flaeche
         self.zeichnungs_status["landmarken"] = {}
@@ -1271,7 +1343,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def bereich_vermessen_start(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring areas needs a loaded scan")
             return
+        print("Measuring areas started, draw as many areas as needed and close every loop")
         self.setze_zeichnungs_status_zurueck()
         self.vermessungen.clear()
         self.zeige_basis_mesh_neu()
@@ -1303,6 +1377,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
     def _anteil_checkbox_vorbereiten(self):
         moeglich = self._ist_isolierter_finger()
+        if moeglich:
+            print("Isolated and aligned finger, the share of the finger surface can be calculated")
+        else:
+            print("Not an isolated finger, the share of the finger surface stays switched off")
         self.checkbox_anteil.setEnabled(moeglich)
         self.checkbox_anteil.setChecked(moeglich)
         self.checkbox_anteil.setToolTip(
@@ -1331,6 +1409,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             "actor": actor,
             "zahl_actor": zahl_actor,
         })
+        print(f"Area {nummer} closed: {flaecheninhalt:.1f} mm² surface, {umfang:.1f} mm perimeter")
         self.zeige_messergebnisse()
 
     def zeige_messergebnisse(self):
@@ -1347,9 +1426,11 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def letzte_flaeche_zuruecknehmen(self):
         if not self.vermessungen:
             self.hinweis_label.setText("Es gibt nichts zurückzunehmen.")
+            print("Nothing to take back, no area measured yet")
             return
 
         messung = self.vermessungen.pop()
+        print(f"Area {len(self.vermessungen) + 1} taken back, {len(self.vermessungen)} left")
         for actor in (messung["actor"], messung["zahl_actor"]):
             if actor is not None:
                 self.plotter.remove_actor(actor, reset_camera=False)
@@ -1359,17 +1440,22 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def vermessungen_speichern_klick(self):
         if not self.vermessungen:
             self.hinweis_label.setText("Noch keine Fläche gezeichnet!")
+            print("No area measured yet, nothing to save")
             return
 
         self.plotter.disable_picking()
         scan_ordner = Path(self.aktueller_ordner)
 
+        print(f"Saving {len(self.vermessungen)} measurement(s) for {scan_ordner.name}")
         try:
             obj_pfad = speichere_vermessung(
                 self.aktuelle_teile, self.aktuelles_hand_mesh, self.vermessungen, scan_ordner)
         except Exception as e:
             self.hinweis_label.setText(f"Fehler: {e}")
+            print(f"Saving the measured scan failed: {e}")
             return
+
+        print(f"Measured scan saved in {obj_pfad.parent}")
 
         # Bezugsflaeche fuer den Prozentwert. Schlaegt das fehl, wird die Liste
         # trotzdem geschrieben - der OBJ-Export ist schon durch, ein Abbruch
@@ -1383,19 +1469,26 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 # zur Bezugsflaeche - sonst koennte der Anteil ueber 100 % steigen
                 for messung in self.vermessungen:
                     messung["flaeche_anteil_mm2"] = flaeche_oberhalb_falte(messung["flaeche"])
+                print(f"Finger surface above the web between the fingers: {finger_flaeche:.1f} mm²")
             except Exception as e:
                 finger_flaeche = None
                 anteil_fehler = f"\nAnteil nicht berechenbar: {e}"
+                print(f"The share of the finger surface could not be calculated, the list is written anyway: {e}")
 
         ziel_ordner, ziel_name = vermessungs_ordner(scan_ordner)
         # Die Ergebnisliste liegt eine Ebene ueber dem Scan-Ordner, also
         # direkt in 'vermessene_scans'.
         liste_pfad = schreibe_ergebnis_liste(self.vermessungen, ziel_ordner.parent, ziel_name,
                                              finger_flaeche_mm2=finger_flaeche)
+        if liste_pfad is None:
+            print("Result list skipped, openpyxl is not installed")
+        else:
+            print(f"Result list written to {liste_pfad}")
 
         if finger_flaeche:
             gezaehlt = sum(m["flaeche_anteil_mm2"] for m in self.vermessungen)
             gemalt = sum(m["flaeche_mm2"] for m in self.vermessungen)
+            print(f"Marked {gezaehlt / finger_flaeche * 100:.1f} % of the finger surface above the web")
             anteil_text = f"\nMarkiert: {gezaehlt / finger_flaeche * 100:.1f} % der Fingerfläche ab Zwischenfingerfalte"
             if gemalt - gezaehlt > 0.5:
                 anteil_text += f" ({gemalt - gezaehlt:.1f} mm² liegen darunter und zählen nicht mit)"
@@ -1420,7 +1513,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def vermessen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring needs a loaded scan")
             return
+        print("Measuring menu opened")
         self.haupt_buttons_container.setVisible(False)
         self.vermessung_wahl_container.setVisible(True)
         self.navigatecontainer.setVisible(True)
@@ -1431,6 +1526,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.vermessung_wahl_container.setVisible(False)
         self.navigatecontainer.setVisible(True)
         self.hinweis_label.setText("2x rechtsklicken: Start- und Endpunkt der Strecke.")
+        print("Distance measuring started, right click the start point and the end point")
 
         hand_mesh = self.aktuelles_hand_mesh
         punkte_indices = []
@@ -1442,6 +1538,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 pfad = hand_mesh.geodesic(punkte_indices[0], punkte_indices[1])
                 distanz = np.linalg.norm(np.diff(pfad.points, axis=0), axis=1).sum()
                 self.hinweis_label.setText(f"Strecke auf der Oberfläche: {distanz:.1f} mm")
+                print(f"Distance along the surface: {distanz:.1f} mm over {pfad.n_points} path points")
                 self.navigatecontainer.setVisible(False)
                 self.haupt_buttons_container.setVisible(True)
 
@@ -1453,6 +1550,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                                           point_size=20)
 
     def volumen_messen_klick(self):
+        print("Volume menu opened")
         self.volumen_container.setVisible(True)
         self.vermessung_wahl_container.setVisible(False)
         self.navigatecontainer.setVisible(True)
@@ -1460,23 +1558,29 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def volumen_ganzes_mesh_messen_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring the volume needs a loaded scan")
             return
         elif "iso" not in str(self.aktueller_ordner):
             self.hinweis_label.setText("Erst den Finger isolieren")
+            print("Measuring the volume only works on an isolated finger, isolate it first")
             return
         
         volumen = volumen_gesamtes_mesh(self.aktuelles_hand_mesh)
         self.hinweis_label.setText(f"Volumen des gesamten Mesh: {volumen:.1f} mm³")
+        print(f"Volume of the whole mesh: {volumen:.1f} mm³")
 
     def volumen_alles_ueber_markierung(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring the volume needs a loaded scan")
             return
+        print(f"Looking for the color {self.markierung_farbwahl.farbe} to cut the finger at")
         try:
             volumen, schnitt_hoehe, anzahl_markiert = volumen_ab_markierung(
                 self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code=self.markierung_farbwahl.farbe)
         except ValueError as e:
             self.hinweis_label.setText(f"Fehler: {e}")
+            print(f"Volume above the marking could not be measured: {e}")
             return
 
         bounds = self.aktuelles_hand_mesh.bounds
@@ -1490,17 +1594,22 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.hinweis_label.setText(
             f"Volumen ab Markierung: {volumen:.1f} mm³ "
             f"(Schnitthöhe Z={schnitt_hoehe:.1f}, {anzahl_markiert} markierte Punkte gefunden)")
+        print(f"Volume above the marking: {volumen:.1f} mm³, cut at Z={schnitt_hoehe:.1f} mm, "
+              f"{anzahl_markiert} marked points found")
 
     def volumen_ueber_ring(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring the volume needs a loaded scan")
             return
+        print(f"Looking for the color {self.markierung_farbwahl.farbe} of the rubber ring")
         try:
             volumen, schwerpunkt, normale, anzahl_markiert = volumen_ab_ring(
                 self.aktuelles_hand_mesh, self.aktuelle_teile, hex_code=self.markierung_farbwahl.farbe
             )
         except ValueError as e:
             self.hinweis_label.setText(f"Fehler: {e}")
+            print(f"Volume above the ring could not be measured: {e}")
             return
 
         bounds = self.aktuelles_hand_mesh.bounds
@@ -1511,19 +1620,23 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.hinweis_label.setText(
             f"Volumen ab Ring: {volumen:.1f} mm³ ({anzahl_markiert} markierte Punkte gefunden)"
         )
+        print(f"Volume above the ring: {volumen:.1f} mm³, {anzahl_markiert} points of the ring found")
 
     def volumen_ab_fingerzwischenfalte_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Measuring the volume needs a loaded scan")
             return
         if "iso" not in str(self.aktueller_ordner):
             self.hinweis_label.setText("Erst den Finger isolieren")
+            print("This volume only works on an isolated finger, isolate it first")
             return
 
         try:
             volumen = volumen_ab_fingerzwischenfalte(self.aktuelles_hand_mesh)
         except ValueError as e:
             self.hinweis_label.setText(f"Fehler: {e}")
+            print(f"Volume above the web between the fingers could not be measured: {e}")
             return
 
         bounds = self.aktuelles_hand_mesh.bounds
@@ -1536,6 +1649,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         self.hinweis_label.setText(
             f"Volumen ab der Höhe der Fingerzwischenfalte: {volumen:.1f} mm³")
+        print(f"Volume above the web between the fingers: {volumen:.1f} mm³")
         
     # ---------- Pipette & Overlay Buttons ----------
 
@@ -1545,6 +1659,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.plotter.interactor.setCursor(Qt.CrossCursor)
         self.plotter.interactor.installEventFilter(self)
         self.hinweis_label.setText("Pipette aktiv - auf den Scan klicken, um eine Farbe aufzunehmen.")
+        print("Color picker active, click on the scan to take a color")
 
     def _farbe_am_klick(self, x: int, y: int) -> tuple:
         # Bevorzugt die Textur: dazu muss der Klick erst auf das Mesh
@@ -1556,8 +1671,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             if punkt is not None:
                 hex_code = textur_farbe_an_punkt(self.aktuelle_teile, punkt)
                 if hex_code is not None:
+                    print("Color read straight from the scan texture")
                     return hex_code, "aus der Textur"
 
+        print("The click did not hit the mesh, reading the color from the screenshot instead")
         bild_array = self.plotter.screenshot(return_img=True)
         hoehe, breite = bild_array.shape[:2]
         r, g, b = bild_array[min(max(y, 0), hoehe - 1), min(max(x, 0), breite - 1)][:3]
@@ -1591,6 +1708,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             hex_code, quelle = self._farbe_am_klick(x, y)
             self._pipette_ziel_widget.setze_farbe(hex_code)
             self.hinweis_label.setText(f"Farbe aufgenommen: {hex_code} ({quelle})")
+            print(f"Color picked: {hex_code}")
             return True
         return super().eventFilter(obj, event)
 
@@ -1600,13 +1718,17 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def heatmap_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("The 2D heatmap needs a loaded scan")
             return
         if not self._heatmap_moeglich():
             return
+        print("Building the 2D heatmap from all marked scans of this patient")
         bild = heatmap_main(str(self.aktueller_ordner))
         if bild is None:
             self.hinweis_label.setText("Keine markierten Scans für diesen Patienten gefunden.")
+            print("No marked scans found for this patient, nothing to compare")
             return
+        print(f"2D heatmap saved as {bild}")
         self._bild_zeigen(bild)
 
         # Nav-Spalte neu aufbauen, damit der 2D-Knopf sofort auftaucht, und
@@ -1622,6 +1744,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def genesungsverlauf_3d_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("The 3D recovery progress needs a loaded scan")
             return
         if not self._heatmap_moeglich():
             return
@@ -1638,7 +1761,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             isolierter_name = isolierte_scan_name_aus_markierung(obj_pfad.parent.name)
             isolierter_pfad = patienten_ordner / "isolierte_scans" / isolierter_name
             if not isolierter_pfad.is_dir():
-                print(f"Überspringe {obj_pfad.name}: zugehöriger isolierter Scan nicht gefunden.")
+                print(f"Skipping {obj_pfad.name}, the matching isolated scan {isolierter_name} does not exist")
                 continue
 
             eintrag = {"isolierter_pfad": isolierter_pfad, "markierungs_pfad": obj_pfad}
@@ -1656,7 +1779,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         if len(self.genesungsverlauf_warteschlange) < 2 and aktueller_eintrag["markierungs_pfad"] is None:
             self.hinweis_label.setText("Keine markierten Untersuchungen für diesen Patienten gefunden.")
+            print("No marked examinations found for this patient, nothing to build a progress from")
             return
+
+        print(f"3D recovery progress started, {len(self.genesungsverlauf_warteschlange)} examination(s) in the queue")
 
         self.genesungsverlauf_index = 0
         self.genesungsverlauf_gewinner = {}
@@ -1679,6 +1805,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.plotter.reset_camera()
 
         self._genesungsverlauf_letzter_klick = None   
+        print(f"Step {self.genesungsverlauf_index + 1} of {len(self.genesungsverlauf_warteschlange)}: "
+              f"{eintrag['isolierter_pfad'].name} shown, right click the middle of the fingernail")
         self.hinweis_label.setText(
             f"Genesungsverlauf ({self.genesungsverlauf_index + 1}/{len(self.genesungsverlauf_warteschlange)}): "
             f"Fingernagel anklicken, dann 'Nächsten Finger markieren' zum Bestätigen."
@@ -1709,6 +1837,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             return
         if self._genesungsverlauf_letzter_klick is None:
             self.hinweis_label.setText("Bitte zuerst den Fingernagel anklicken.")
+            print("No fingernail clicked yet, click it before going on")
             return
 
         self.plotter.disable_picking()
@@ -1719,8 +1848,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         eintrag = self.genesungsverlauf_warteschlange[self.genesungsverlauf_index]
         mesh = self._genesungsverlauf_mesh_fuer_klick
         ist_aktuell = eintrag["isolierter_pfad"].resolve() == Path(self.aktueller_ordner).resolve()
-        print(  f"DEBUG: Index={self.genesungsverlauf_index}, ist_aktuell={ist_aktuell}, "
-                f"aktuell_rotiert vorhanden={self.genesungsverlauf_aktuell_rotiert is not None}")   
+        print(f"Aligning step {self.genesungsverlauf_index + 1}, this is the loaded scan: {ist_aktuell}, "
+              f"reference already rotated: {self.genesungsverlauf_aktuell_rotiert is not None}")
         normale = finde_nagel_normale(mesh, geklickter_punkt)
         R = rotationsmatrix_um_z_fuer_nagel_ausrichtung(normale)
         versatz = self._genesungsverlauf_hoehen_versatz(mesh)
@@ -1742,8 +1871,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                     bisherige_farbe = self.genesungsverlauf_gewinner.get(vertex_index)
                     if farb_prioritaet(farbe) > farb_prioritaet(bisherige_farbe):
                         self.genesungsverlauf_gewinner[vertex_index] = farbe
+                print(f"{len(markierung_punkte)} marked points taken over from {eintrag['markierungs_pfad'].parent.name}")
             except ValueError as e:
-                print(f"Überspringe: {e}")
+                print(f"Skipping this marking, it could not be read: {e}")
 
         self.genesungsverlauf_index += 1
         if self.genesungsverlauf_index < len(self.genesungsverlauf_warteschlange):
@@ -1764,6 +1894,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         for vertex_index, farbe in self.genesungsverlauf_gewinner.items():
             farben_gruppen.setdefault(farbe, []).append(vertex_index)
 
+        print(f"{len(self.genesungsverlauf_gewinner)} vertices marked in {len(farben_gruppen)} colors")
         for farbe, indices in farben_gruppen.items():
             maske = np.zeros(self.aktuelles_hand_mesh.n_points, dtype=bool)
             maske[indices] = True
@@ -1782,6 +1913,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.aktuelles_hand_mesh, self.aktuelle_teile, self.genesungsverlauf_gewinner, str(self.aktueller_ordner)
         )
         self.hinweis_label.setText(f"Genesungsverlauf erstellt und gespeichert: {save_path.parent.name}")
+        print(f"3D recovery progress built and saved in {save_path.parent}")
 
     def _genesungsverlauf_hoehen_versatz(self, mesh, ziel_hoehe=30):
         #Verstz auf Höhe, dass die Fingerspitze auf Höhe 30 ist, dass die Höhe genau passt
@@ -1790,8 +1922,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def genesungsverlauf_speichern_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
+            print("Saving the recovery progress needs a loaded scan")
             return
 
         save_path = speichere_genesungsverlauf(self.aktuelles_hand_mesh, self.aktuelle_teile, str(self.aktueller_ordner))
         self.hinweis_label.setText(f"Genesungsverlauf gespeichert: {save_path.parent.name}")
+        print(f"Recovery progress saved in {save_path.parent}")
         self.button_speichere_genesungsverlauf_overlay.setVisible(False)

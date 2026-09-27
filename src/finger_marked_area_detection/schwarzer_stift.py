@@ -16,7 +16,6 @@ from scipy import ndimage
 from scipy.spatial import cKDTree
 
 import konstanten as k
-from isolate_finger import rendere_teile
 
 
 # ---------- Filterkette  ----------

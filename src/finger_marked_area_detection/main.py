@@ -7,8 +7,14 @@ if sys.platform.startswith("linux"):
     qt_lib_pfad = os.path.join(os.path.dirname(PySide6.__file__), "Qt", "lib")
     os.environ["LD_LIBRARY_PATH"] = qt_lib_pfad + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
 
+# Vor allen weiteren Importen: ab hier landet jede Ausgabe zusaetzlich im
+# Terminal-Fenster der Software. Spaeter gestartet fehlte genau das, was die
+# Bibliotheken beim Laden ausgeben.
+from terminal_mitschnitt import starte_mitschnitt
+starte_mitschnitt()
+
 from PySide6.QtWidgets import QApplication
- 
+
 from theme import QSS
 from userinterface import HauptFenster
  

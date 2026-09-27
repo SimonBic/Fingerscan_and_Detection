@@ -1,19 +1,10 @@
 from pathlib import Path
 import numpy as np
 import trimesh
-import pyvista as p_v
 import matplotlib.pyplot as plt
-from PIL import Image
-from scipy.spatial import cKDTree
-import re
 
-from draw_area_on_scan import (
-    lese_markierungsfarbe,
-    extract_faces_of_hand)
-
-from heatmap3D import (
-    farb_prioritaet,
-    finde_markierte_scans)
+from draw_area_on_scan import lese_markierungsfarbe
+from heatmap3D import finde_markierte_scans
 
 def punkt_abwickeln(punkt: np.ndarray) -> tuple:
     x, y, z = punkt

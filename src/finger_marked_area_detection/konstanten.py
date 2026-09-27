@@ -31,11 +31,32 @@ DRUCK_TEXTFARBE = "#000000"
 ANLEITUNG_FENSTER_TITEL = "Anleitung"
 ANLEITUNG_FENSTER_GROESSE = (1000, 800)
 
-# Fragezeichen-Knopf unten links. Quadratisch und bewusst klein - er soll
+# Fragezeichen-Knopf unten links. Quadratisch und bewusst klein, er soll
 # auffindbar sein, ohne den Hauptknoepfen die Aufmerksamkeit zu nehmen.
 HILFE_KNOPF_GROESSE = 36
 HILFE_KNOPF_TEXT = "?"
 HILFE_KNOPF_HILFE = "Anleitung öffnen"
+
+
+# ---------- Terminalausgabe ----------
+
+# Alles, was die Software nach stdout und stderr schreibt, wird mitgeschnitten
+# und ist ueber den ">_"-Knopf unten links nachzulesen. Ringpuffer, weil bei
+# einem langen Arbeitstag mit vielen Scans sonst beliebig viele Zeilen
+# zusammenkommen. 20000 Zeilen sind grob 2 MB, das faellt neben einem Scan
+# von 1,2 GB nicht auf.
+TERMINAL_MAX_ZEILEN = 20000
+
+TERMINAL_FENSTER_TITEL = "Terminalausgabe"
+TERMINAL_FENSTER_GROESSE = (1000, 800)
+
+# Solange die Seite offen ist, wird sie nachgezogen - so kann man beim
+# Isolieren oder Vermessen zuschauen, ohne sie neu oeffnen zu muessen
+TERMINAL_AKTUALISIERUNG_MS = 500
+
+# Nichtproportional, damit Zahlenkolonnen und Tabellen untereinander stehen
+TERMINAL_SCHRIFT = "monospace"
+TERMINAL_SCHRIFTGROESSE = 12
 
 # Die Anzeige laeuft im dunklen Theme - weisse Schrift auf dunklem Grund
 # waere auf Papier unlesbar bzw. eine Tonerverschwendung. Fuer den Druck
