@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication)
 
 import konstanten as k
-import terminal_mitschnitt
+from ui_unterklassen.terminal import terminal_mitschnitt
 
 
 class TerminalSeite(QWidget):

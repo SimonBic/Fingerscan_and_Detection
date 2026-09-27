@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QLabel, QSlider, QPushButton
 from PySide6.QtCore import Qt
 
-from farberkennung import erzeuge_farbpalette
+from logik.farberkennung import erzeuge_farbpalette
 
 
 class FarbAuswahlWidget(QWidget):

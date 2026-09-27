@@ -60,7 +60,7 @@ cd Fingerscan_and_Detection/src/installer
 Vernwendung (Oder einfach das erstelle Icon anklicken)
 
 ```bash
-.venv/bin/python src/finger_marked_area_detection/main.py
+.venv/bin/python src/fingerscan_viewer/main.py
 ```
 
 Das Skript legt eine eigene virtuelle Umgebung an, installiert alle Pakete in exakt den getesteten Versionen aus `requirements.txt` und richtet ein Desktop-Icon ein. Läuft auf Fedora und Ubuntu.

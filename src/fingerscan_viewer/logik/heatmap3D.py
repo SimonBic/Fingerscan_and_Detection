@@ -6,7 +6,7 @@ from PIL import Image
 from scipy.spatial import cKDTree
 import re
 
-from draw_area_on_scan import (
+from logik.draw_area_on_scan import (
     lese_markierungsfarbe,
     extract_faces_of_hand)
 from scipy.sparse import csr_matrix

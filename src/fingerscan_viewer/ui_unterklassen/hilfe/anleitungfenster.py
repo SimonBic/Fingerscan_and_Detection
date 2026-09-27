@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout)
 
 import konstanten as k
-from ui_unterklassen.how_to_seite import HowToSeite
+from ui_unterklassen.hilfe.how_to_seite import HowToSeite
 
 
 class AnleitungFenster(QDialog):

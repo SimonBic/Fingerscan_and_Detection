@@ -19,7 +19,7 @@ from pathlib import Path
 
 INSTALLER_ORDNER = Path(__file__).resolve().parent
 REPO_ORDNER = INSTALLER_ORDNER.parent.parent
-APP_ORDNER = REPO_ORDNER / "src" / "finger_marked_area_detection"
+APP_ORDNER = REPO_ORDNER / "src" / "fingerscan_viewer"
 VENV_PFAD = REPO_ORDNER / ".venv"
 REQUIREMENTS_PFAD = REPO_ORDNER / "requirements.txt"
 LOGO_PNG_PFAD = INSTALLER_ORDNER / "logo.png"

@@ -6,7 +6,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from isolate_finger import load_teilmeshe_mit_textur
+from logik.isolate_finger import load_teilmeshe_mit_textur
 
 
 def pruefe_overlap(ordner: Path, toleranz_faktor: float = 0.25) -> None:

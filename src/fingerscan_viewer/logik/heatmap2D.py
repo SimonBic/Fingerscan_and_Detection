@@ -3,8 +3,8 @@ import numpy as np
 import trimesh
 import matplotlib.pyplot as plt
 
-from draw_area_on_scan import lese_markierungsfarbe
-from heatmap3D import finde_markierte_scans
+from logik.draw_area_on_scan import lese_markierungsfarbe
+from logik.heatmap3D import finde_markierte_scans
 
 def punkt_abwickeln(punkt: np.ndarray) -> tuple:
     x, y, z = punkt

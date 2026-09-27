@@ -1,7 +1,7 @@
 import numpy as np
 import pyvista as p_v
 import vtk
-from farberkennung import finde_markierungs_punkte 
+from logik.farberkennung import finde_markierungs_punkte 
 
 def umfang_der_schnittkante(flaeche: p_v.PolyData, epsilon: float = 1e-3) -> float:
     """Umfang der ausgeschnittenen Flaeche - gemessen an ihrem tatsaechlichen

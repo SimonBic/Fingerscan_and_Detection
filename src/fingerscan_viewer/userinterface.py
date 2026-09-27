@@ -39,14 +39,14 @@ from PySide6.QtGui import (
     QDesktopServices,
     QPixmap)
 
-from utils import generator_bis_ende
-from farberkennung import (
+from logik.utils import generator_bis_ende
+from logik.farberkennung import (
     finde_markierungs_punkte,
     entferne_ausreisser_punkte,
     baue_geschlossenen_pfad,
     textur_farbe_an_punkt)
-from schwarzer_stift import markiere_strich
-from messungen import (
+from logik.schwarzer_stift import markiere_strich
+from logik.messungen import (
     berechne_flaeche_und_umfang, 
     volumen_ab_markierung,
     volumen_ab_ring, 
@@ -54,8 +54,8 @@ from messungen import (
     flaeche_ab_fingerzwischenfalte,
     flaeche_oberhalb_falte,
     volumen_gesamtes_mesh)
-from farbauswahl_widget import FarbAuswahlWidget
-from isolate_finger import (
+from ui_unterklassen.hauptmenue.farbauswahl_widget import FarbAuswahlWidget
+from logik.isolate_finger import (
     rendere_teile,
     load_teilmeshe_mit_textur,
     isolate_finger,
@@ -63,18 +63,18 @@ from isolate_finger import (
     finger_normale,
     lade_isolate_finger_parameter,
     speichere_isolate_finger_parameter)
-from draw_area_on_scan import (
+from logik.draw_area_on_scan import (
     draw_main, 
     save_drawn_area, 
     extract_faces_of_hand,
     schneide_flaeche_aus_loop,
     lese_markierungsfarbe)
-from vermessung_speichern import (
+from logik.vermessung_speichern import (
     baue_zahl_fuer_messung,
     speichere_vermessung,
     schreibe_ergebnis_liste,
     vermessungs_ordner)
-from heatmap3D import (
+from logik.heatmap3D import (
     bereiche_in_markierung,
     speichere_genesungsverlauf,
     finde_markierte_scans,
@@ -83,16 +83,16 @@ from heatmap3D import (
     rotationsmatrix_um_z_fuer_nagel_ausrichtung,
     isolierte_scan_name_aus_markierung,
     farb_prioritaet)
-from heatmap2D import heatmap_main
-from ui_unterklassen.untersuchungs_dialog import (
+from logik.heatmap2D import heatmap_main
+from ui_unterklassen.patientenverwaltung.untersuchungs_dialog import (
     UntersuchungDialog,
     op_bezug)
-from ui_unterklassen.blase import IconBlase
-from ui_unterklassen.oberflaeche import UI_Aufbau_Mixin
-from ui_unterklassen.titel_bildschirm import TitelBildschirm
-from ui_unterklassen.anleitungfenster import AnleitungFenster
-from ui_unterklassen.terminal_fenster import TerminalFenster
-from ui_unterklassen.root_ordner_dialog import root_ordner_waehlen
+from ui_unterklassen.patientenverwaltung.blase import IconBlase
+from ui_unterklassen.hauptmenue.oberflaeche import UI_Aufbau_Mixin
+from ui_unterklassen.titelbildschirm.titel_bildschirm import TitelBildschirm
+from ui_unterklassen.hilfe.anleitungfenster import AnleitungFenster
+from ui_unterklassen.terminal.terminal_fenster import TerminalFenster
+from ui_unterklassen.hauptmenue.root_ordner_dialog import root_ordner_waehlen
 import konstanten as k
 
 

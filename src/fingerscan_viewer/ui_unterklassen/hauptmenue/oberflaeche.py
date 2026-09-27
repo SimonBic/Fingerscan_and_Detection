@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (
 from pyvistaqt import QtInteractor
 
 import konstanten as k
-from farbauswahl_widget import FarbAuswahlWidget
-from ui_unterklassen.hinweis_label import HinweisLabel, HinweisBereich
+from ui_unterklassen.hauptmenue.farbauswahl_widget import FarbAuswahlWidget
+from ui_unterklassen.hauptmenue.hinweis_label import HinweisLabel, HinweisBereich
 
 
 class UI_Aufbau_Mixin:

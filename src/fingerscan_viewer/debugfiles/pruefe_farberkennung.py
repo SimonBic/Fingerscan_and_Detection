@@ -8,14 +8,14 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import konstanten as k
-from farberkennung import (
+from logik.farberkennung import (
     finde_markierungs_punkte,
     kleinster_farbabstand,
     medianer_texelabstand,
     schwelle_aus_verteilung,
     texel_koordinaten,
 )
-from isolate_finger import load_teilmeshe_mit_textur
+from logik.isolate_finger import load_teilmeshe_mit_textur
 
 Image.MAX_IMAGE_PIXELS = None       # die Scanner liefern 8192x8192
 

@@ -18,4 +18,4 @@ __pycache__/
 overlay_*.png
 *_diffuse.png
 debugfiles/*.png
-src/finger_marked_area_detection/debugfiles/*.png
+src/fingerscan_viewer/debugfiles/*.png

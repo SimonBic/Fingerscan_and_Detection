@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout)
 
 import konstanten as k
-from ui_unterklassen.terminal_seite import TerminalSeite
+from ui_unterklassen.terminal.terminal_seite import TerminalSeite
 
 
 class TerminalFenster(QDialog):

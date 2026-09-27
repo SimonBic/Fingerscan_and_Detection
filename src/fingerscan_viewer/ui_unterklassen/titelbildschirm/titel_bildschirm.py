@@ -4,9 +4,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QStackedWidget)
 
-from ui_unterklassen.netzhintergrund import NetzHintergrund
-from ui_unterklassen.menue_seite import MenueSeite
-from ui_unterklassen.how_to_seite import HowToSeite
+from ui_unterklassen.titelbildschirm.netzhintergrund import NetzHintergrund
+from ui_unterklassen.titelbildschirm.menue_seite import MenueSeite
+from ui_unterklassen.hilfe.how_to_seite import HowToSeite
 
 
 class TitelBildschirm(QWidget):

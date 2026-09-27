@@ -23,7 +23,7 @@ set -e  # Skript abbrechen, falls n Befehl fehlschlaegt
 #Herausfinden, wo dieses Skript leigt
 INSTALLER_ORDNER="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 REPO_ORDNER="$( dirname "$( dirname "$INSTALLER_ORDNER" )" )"
-APP_ORDNER="$REPO_ORDNER/src/finger_marked_area_detection"
+APP_ORDNER="$REPO_ORDNER/src/fingerscan_viewer"
 ICON_PFAD="$INSTALLER_ORDNER/logo.svg"
 
 echo "Installer-Ordner gefunden: $INSTALLER_ORDNER"

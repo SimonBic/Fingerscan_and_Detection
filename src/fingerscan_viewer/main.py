@@ -10,7 +10,7 @@ if sys.platform.startswith("linux"):
 # Vor allen weiteren Importen: ab hier landet jede Ausgabe zusaetzlich im
 # Terminal-Fenster der Software. Spaeter gestartet fehlte genau das, was die
 # Bibliotheken beim Laden ausgeben.
-from terminal_mitschnitt import starte_mitschnitt
+from ui_unterklassen.terminal.terminal_mitschnitt import starte_mitschnitt
 starte_mitschnitt()
 
 from PySide6.QtWidgets import QApplication
