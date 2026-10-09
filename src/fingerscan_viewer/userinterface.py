@@ -241,6 +241,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             button.setVisible(False)
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.plotter.disable_picking()
+        self._isolieren_zuruecksetzen()
         self._pipette_aktiv = False
         self.plotter.interactor.removeEventFilter(self)
         self.plotter.interactor.unsetCursor()
@@ -1078,6 +1079,23 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
     # ---------- Finger isolieren ----------
 
+    def _isolieren_zuruecksetzen(self):
+        #Nach Abbruch oder Fehler darf nichts vom alten Durchlauf (Modus,
+        #Phase, Weiter-Knopf, Ellipsoid-Regler) im naechsten haengen bleiben
+        self.isolieren_ablauf = None
+        self.automatisch_modus_aktiv = False
+        self.isolieren_phase = None
+        self.aktueller_ellipsoid_actor = None
+        self.button_weiter.setText("Weiter")
+        self.button_weiter.setVisible(False)
+        self.ellipsoid_einstellen_container.setVisible(False)
+
+    def _isolieren_fehlgeschlagen(self, fehler):
+        #Zurueck ins Hauptmenue, sonst bleibt die Knopfleiste ausgeblendet
+        print(f"Isolating the finger failed: {fehler}")
+        self.lade_main_menu()
+        self.hinweis_label.setText(f"Fehler: {fehler}")
+
     def isolieren_klick(self):
         if self.aktueller_ordner is None:
             self.hinweis_label.setText("Erst einen Scan laden!")
@@ -1109,7 +1127,12 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.automatisch_modus_aktiv = True
         self.button_weiter.setText("Fertig markiert")
         self.button_weiter.setVisible(True)
-        next(self.isolieren_ablauf)
+        try:
+            next(self.isolieren_ablauf)
+        except Exception as e:
+            self._isolieren_fehlgeschlagen(e)
+            return
+        self.hinweis_label.setText(f"Bitte die Fingerspitze des verletzten Fingers rechtsklicken, dann die benachbarte Fingerspitze.\nDanach auf 'Fertig markiert' klicken.")
         print("Right click the hurt fingertip, then the neighbouring fingertip")
 
     def manuell_klick(self):
@@ -1117,11 +1140,17 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.button_manuell.setVisible(False)
         ordner = Path(self.aktueller_ordner)
         self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=True)
+        self.automatisch_modus_aktiv = False
         self.isolieren_phase = "picking"
         self.button_weiter.setVisible(True)
         self.navigatecontainer.setVisible(True)
-        next(self.isolieren_ablauf)
+        try:
+            next(self.isolieren_ablauf)
+        except Exception as e:
+            self._isolieren_fehlgeschlagen(e)
+            return
         print("Manual isolation started, right click the hurt fingertip, then the neighbouring fingertip")
+        self.hinweis_label.setText(f"Bitte die Fingerspitze des verletzten Fingers rechtsklicken, dann die benachbarte Fingerspitze.\nDanach auf 'Fertig markiert' klicken.")
 
     def weiter_klick(self):
         self.navigatecontainer.setVisible(False)
@@ -1134,10 +1163,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)
                 self.aktueller_ordner = Path(gespeicherter_obj_pfad)
             except Exception as e:
-                self.hinweis_label.setText(f"Fehler: {e}")
-                print(f"Isolating the finger failed: {e}")
-                self.isolieren_wahl_container.setVisible(False)
-                self.haupt_buttons_container.setVisible(True)
+                self._isolieren_fehlgeschlagen(e)
                 return
             self.isolieren_wahl_container.setVisible(False)
             self.haupt_buttons_container.setVisible(True)
@@ -1148,7 +1174,12 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         if getattr(self, "isolieren_phase", None) == "picking":
             self.isolieren_phase = "ellipsoid"
             self.button_weiter.setVisible(False)
-            self.ellipsoid_kontext = next(self.isolieren_ablauf)
+            try:
+                self.ellipsoid_kontext = next(self.isolieren_ablauf)
+            except Exception as e:
+                #z.B. weniger als 2 Fingerspitzen angeklickt
+                self._isolieren_fehlgeschlagen(e)
+                return
             self.ellipsoid_einstellen_container.setVisible(True)
             self.aktualisiere_ellipsoid_vorschau()
             print("Fingertips accepted, now adjust the cutting ellipsoid with the sliders")
@@ -1225,6 +1256,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             return
         except StopIteration as e:
             gespeicherter_obj_pfad = e.value
+        except Exception as e:
+            self._isolieren_fehlgeschlagen(e)
+            return
 
         self.aktueller_ordner = Path(gespeicherter_obj_pfad)
         self.isolieren_phase = None
@@ -1340,6 +1374,9 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                                       self.zeichnungs_status["landmarken"])
         print(f"Marked scan saved in {gespeichert}")
         self._schreibe_markierungs_liste(gespeichert)
+        #Das Pfad-Picking vom Zeichnen laeuft sonst weiter, und das
+        #naechste Finger isolieren scheitert an "Picking is already enabled"
+        self.plotter.disable_picking()
         self.lade_und_zeige(Path(self.aktueller_ordner))
         self.farbe_wahl_container.setVisible(False)
         self.haupt_buttons_container.setVisible(True)

@@ -674,9 +674,14 @@ def isolate_finger(path: str,
             punkte.append(np.array(point))
             print(f"Punkt {len(punkte)} gewählt bei: {point}")
 
+        #Falls vorher noch ein Picking aktiv war (z.B. vom Zeichnen), wirft
+        #pyvista sonst einen PyVistaPickingError
+        plotter.disable_picking()
+        print("disabled picking in plotter, meaning cleanup")
         plotter.enable_point_picking(
             callback=punkt_callback, use_picker=True, show_point=True, color="red", point_size=15
         )
+        print("enabled picking in plotter, now new and clean")
 
         yield   # Nutzer klickt jetzt 2 Punkte, dann "Fertig markiert"/"Weiter"
 
