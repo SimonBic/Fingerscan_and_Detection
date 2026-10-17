@@ -77,6 +77,13 @@ EINSTELLUNGEN_APP = "Fingerscan-Viewer"
 ROOT_ORDNER_SCHLUESSEL = "root_ordner"
 VIEWER_ANZAHL_SCHLUESSEL = "viewer_anzahl"
 FORTGESCHRITTEN_SCHLUESSEL = "fortgeschrittener_modus"
+# Knopfgroessen in Prozent, je Gruppe ein Wert
+KNOPF_GROESSEN_SCHLUESSEL = {
+    "links": "knopf_groesse_links",
+    "nav": "knopf_groesse_nav",
+    "pikto": "knopf_groesse_pikto",
+}
+KNOPF_GROESSEN_GEKOPPELT_SCHLUESSEL = "knopf_groessen_gekoppelt"   # Schloss im Dialog zu?
 
 
 # ---------- Mehrere Viewer ----------
@@ -112,6 +119,25 @@ NETZ_HINTERGRUND = "#F5F7FA"
 KNOPF_BREITE = 192
 KNOPF_HOEHE = 108
 ZAHNRAD_BREITE = 36     # Einstellungsknopf rechts neben dem Hinweistext
+
+# Einstellbare Knopfgroessen. Alle Groessen und Schriften unten gelten fuer
+# 100 % und werden mit dem eingestellten Wert der Gruppe multipliziert.
+KNOPF_GROESSE_MIN = 50
+KNOPF_GROESSE_MAX = 200
+KNOPF_GROESSE_FORTGESCHRITTEN_MIN = 1       # nur im Fortgeschrittenen Modus
+KNOPF_GROESSE_FORTGESCHRITTEN_MAX = 1000
+KNOPF_GRUPPEN = [
+    ("links", "Knöpfe links"),
+    ("nav", "Patienten und Untersuchungen"),
+    ("pikto", "Piktogramme"),
+]
+SEITEN_KNOPF_SCHRIFT = 14   # Knoepfe links
+ANTEIL_SCHRIFT = 12         # Checkbox "Anteil an der Fingerflaeche" links
+NAV_SCHRIFT = 10            # Patienten- und Untersuchungs-Knoepfe
+PATIENT_ICON = 44           # Avatar im Patienten-Knopf
+# Knopfspalte links und Nav-Spalte rechts duerfen je hoechstens so viel der
+# Fensterbreite nehmen, der Rest wird gescrollt. So bleibt der Viewer sichtbar.
+SEITENSPALTE_MAX_ANTEIL = 0.3
 
 
 # ---------- Nav-Spalte ----------

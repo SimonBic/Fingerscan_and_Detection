@@ -1,6 +1,9 @@
+import math
+
 from PySide6.QtCore import (
     Qt,
     QPoint,
+    QRect,
     QPointF,
     QRectF,
     Signal,
@@ -12,7 +15,7 @@ from PySide6.QtGui import (
     QColor)
 from PySide6.QtWidgets import (
     QWidget,
-    QVBoxLayout,
+    QGridLayout,
     QGraphicsDropShadowEffect)
 
 import konstanten as k
@@ -25,6 +28,12 @@ class _BlasenFlaeche(QWidget):
     def __init__(self, strich_y, eltern=None):
         super().__init__(eltern)
         self._strich_y = strich_y
+
+    def setze_strich_y(self, strich_y):
+        # Wird die Blase verschoben, damit sie ins Fenster passt, muss der
+        # Strich trotzdem auf die Mitte des Knopfs zeigen
+        self._strich_y = strich_y
+        self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -57,13 +66,17 @@ class IconBlase(QWidget):
 
         # Strich auf Hoehe der Knopfmitte; die erste Icon-Reihe beginnt auf
         # Hoehe der Knopf-Oberkante
-        self._flaeche = _BlasenFlaeche(k.BLASE_POLSTER + anker.height() / 2, self)
-        layout = QVBoxLayout(self._flaeche)
+        self._strich_y = k.BLASE_POLSTER + anker.height() / 2
+        self._flaeche = _BlasenFlaeche(self._strich_y, self)
+        layout = QGridLayout(self._flaeche)
         layout.setContentsMargins(k.BLASE_POLSTER, k.BLASE_POLSTER,
                                   k.BLASE_POLSTER + k.BLASE_VERBINDUNG, k.BLASE_POLSTER)
         layout.setSpacing(k.NAV_ABSTAND)
-        for knopf in knoepfe:
-            layout.addWidget(knopf)
+        # Normal eine Spalte untereinander. Bei grossen Piktogrammen passt
+        # die nicht mehr ins Fenster, dann auf mehrere Spalten verteilen.
+        reihen = self._reihen_die_passen(knoepfe)
+        for nummer, knopf in enumerate(knoepfe):
+            layout.addWidget(knopf, nummer % reihen, nummer // reihen)
 
         schatten = QGraphicsDropShadowEffect(self._flaeche)
         schatten.setBlurRadius(14)
@@ -82,11 +95,47 @@ class IconBlase(QWidget):
         self._animation.valueChanged.connect(self._schritt)
         self._animation.finished.connect(self._fertig)
 
+    def _grenze(self):
+        # Der Bereich, in dem die Blase bleiben soll: das Hauptfenster, und
+        # davon nur, was auch auf dem Bildschirm liegt
+        fenster = self._anker.window()
+        grenze = QRect(fenster.mapToGlobal(QPoint(0, 0)), fenster.size())
+        bildschirm = self._anker.screen()
+        if bildschirm is not None:
+            grenze = grenze.intersected(bildschirm.availableGeometry())
+        return grenze
+
+    def _reihen_die_passen(self, knoepfe):
+        if not knoepfe:
+            return 1
+        knopf_hoehe = knoepfe[0].minimumHeight() or knoepfe[0].sizeHint().height()
+        platz = self._grenze().height() - 2 * k.BLASE_RAND - 2 * k.BLASE_POLSTER
+        reihen = max(1, (platz + k.NAV_ABSTAND) // (knopf_hoehe + k.NAV_ABSTAND))
+        # Gleichmaessig verteilen: 5 Knoepfe bei 4 passenden Reihen werden
+        # 3 + 2 statt 4 + 1
+        spalten = math.ceil(len(knoepfe) / reihen)
+        return math.ceil(len(knoepfe) / spalten)
+
     def zeigen(self):
         # Strich endet genau an der linken Kante des Knopfs
         oben_links = self._anker.mapToGlobal(QPoint(0, 0))
-        self.move(oben_links.x() - self._flaeche.width() - k.BLASE_RAND,
-                  oben_links.y() - k.BLASE_POLSTER - k.BLASE_RAND)
+        x = oben_links.x() - self._flaeche.width() - k.BLASE_RAND
+        y = oben_links.y() - k.BLASE_POLSTER - k.BLASE_RAND
+
+        # Ragt die Blase unten aus dem Fenster, so weit hochschieben, bis sie
+        # passt. Oben aber nicht ueber den Fensterrand hinaus.
+        grenze = self._grenze()
+        if y + self.height() > grenze.bottom() + 1:
+            y = grenze.bottom() + 1 - self.height()
+        y = max(y, grenze.top())
+        self.move(x, y)
+
+        # Der Strich zeigt weiter auf die Knopfmitte, auch wenn die Blase
+        # verschoben wurde. Nicht in die runden Ecken hinein.
+        knopf_mitte = oben_links.y() + self._anker.height() / 2 - (y + k.BLASE_RAND)
+        self._strich_y = min(max(knopf_mitte, k.BLASE_RADIUS),
+                             self._flaeche.height() - k.BLASE_RADIUS)
+        self._flaeche.setze_strich_y(self._strich_y)
 
         # Fuer das Aufploppen wird ein Standbild skaliert: echte Widgets
         # lassen sich nicht stufenlos skalieren. Am Ende uebernehmen wieder
@@ -114,7 +163,7 @@ class IconBlase(QWidget):
         groesse = 0.55 + 0.45 * QEasingCurve(QEasingCurve.OutBack).valueForProgress(self._t)
         deckkraft = QEasingCurve(QEasingCurve.OutCubic).valueForProgress(min(1.0, self._t * 1.6))
         spitze = QPointF(k.BLASE_RAND + self._flaeche.width(),
-                         k.BLASE_RAND + k.BLASE_POLSTER + self._anker.height() / 2)
+                         k.BLASE_RAND + self._strich_y)
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.setOpacity(deckkraft)

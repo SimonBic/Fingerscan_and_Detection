@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
-    QHBoxLayout)
+    QHBoxLayout,
+    QApplication)
 
 import konstanten as k
+from theme import QSS, knopf_groessen_qss
 from ui_unterklassen.hauptmenue.farbauswahl_widget import FarbAuswahlWidget
 from ui_unterklassen.hauptmenue.hinweis_label import HinweisLabel, HinweisBereich
 from ui_unterklassen.hauptmenue.viewer_raster import ViewerRaster
@@ -94,6 +96,7 @@ class UI_Aufbau_Mixin:
         self.einzeichnen_farbwahl = FarbAuswahlWidget(standard_farbe="#000000")
         self.einzeichnen_farbwahl.button_pipette.clicked.connect(
             lambda: self.pipette_aktivieren(self.einzeichnen_farbwahl))
+        self._farbwahl_merken(self.einzeichnen_farbwahl)
         malen_wahl_layout.addWidget(self.einzeichnen_farbwahl)
 
         self.knopf_layout.addWidget(self.malen_wahl_container)
@@ -108,7 +111,7 @@ class UI_Aufbau_Mixin:
         # sonst waere der Bezugswert die halbe Hand
         self.checkbox_anteil = QCheckBox(k.ANTEIL_CHECKBOX_TEXT)
         self.checkbox_anteil.setObjectName("anteil_checkbox")
-        self.checkbox_anteil.setFixedWidth(k.KNOPF_BREITE)
+        self._seiten_widget_merken(self.checkbox_anteil, k.KNOPF_BREITE)
         vermessen_malen_layout.addWidget(self.checkbox_anteil)
         self.knopf_layout.addWidget(self.vermessen_malen_container)
         self.vermessen_malen_container.setVisible(False)
@@ -144,6 +147,7 @@ class UI_Aufbau_Mixin:
         self.markierung_farbwahl = FarbAuswahlWidget(standard_farbe="#DD11ED")
         self.markierung_farbwahl.button_pipette.clicked.connect(
             lambda: self.pipette_aktivieren(self.markierung_farbwahl))
+        self._farbwahl_merken(self.markierung_farbwahl)
         volumen_layout.addWidget(self.markierung_farbwahl)
 
         self.knopf_layout.addWidget(self.volumen_container)
@@ -183,20 +187,29 @@ class UI_Aufbau_Mixin:
         self.knopf_layout.addLayout(hilfe_zeile)
 
         # --- Knopf-Spalte ganz links ins Haupt-Layout ---
-        haupt_layout.addWidget(self.knopf_spalte)
+        # In einer Scroll-Flaeche: bei grossen Knoepfen wuerde die Spalte sonst
+        # hoeher oder breiter als der Bildschirm und das Fenster gleich mit
+        self.knopf_bereich = QScrollArea()
+        self.knopf_bereich.setFrameShape(QFrame.NoFrame)
+        self.knopf_bereich.setWidgetResizable(True)
+        self.knopf_bereich.setWidget(self.knopf_spalte)
+        haupt_layout.addWidget(self.knopf_bereich)
+        # Wird links ein anderer Container sichtbar oder aendert sich eine
+        # Knopfgroesse, die Breite der Spalte neu rechnen
+        self.knopf_spalte.installEventFilter(self)
 
         # --- Navigations-Spalte ganz rechts, feste Breite ---
         self.nav_spalte = QScrollArea()
         self.nav_spalte.setFrameShape(QFrame.NoFrame)
         self.nav_spalte.setWidgetResizable(True)
-        self.nav_spalte.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Waagrecht nur, wenn die Knoepfe breiter sind als die erlaubte Spaltenbreite
+        self.nav_spalte.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         # Genau so breit wie der Inhalt: Rand | Piktogramm | Abstand | Avatar | Rand,
         # plus Platz fuer die senkrechte Scrollleiste. Die wird fest reserviert,
         # sonst schiebt sie sich bei vielen Patienten ueber die Avatare.
         self.nav_spalte.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.nav_spalte.verticalScrollBar().ensurePolished()
-        inhalt_breite = k.NAV_ABSTAND + k.PIKTO_GROESSE + k.NAV_ABSTAND + k.NAV_KNOPF_BREITE + k.NAV_ABSTAND
-        self.nav_spalte.setFixedWidth(inhalt_breite + self.nav_spalte.verticalScrollBar().sizeHint().width())
+        self._seitenspalten_breiten_setzen()
 
         self.nav_inhalt = QWidget()
         self.nav_layout = QVBoxLayout(self.nav_inhalt)
@@ -311,12 +324,17 @@ class UI_Aufbau_Mixin:
         self._waechter_timer.timeout.connect(self._patienten_pruefen)
         self._angezeigte_signaturen = {}
 
+        # Schriften zu den gespeicherten Knopfgroessen, die Nav-Spalte wird
+        # gleich darunter ohnehin gebaut
+        self._knopf_groessen_anwenden(nav_neu_bauen=False)
         self._root_ordner_anwenden()
         self.baum_neu_aufbauen()
 
     def _knopf(self, text: str, funktion, ziel_layout, x = k.KNOPF_BREITE, y = k.KNOPF_HOEHE) -> QPushButton:
         button = QPushButton(text)
-        button.setFixedSize(x, y)
+        # Ueber den Namen findet die Schriftgroesse aus knopf_groessen_qss den Knopf
+        button.setObjectName("seiten_knopf")
+        self._seiten_widget_merken(button, x, y)
         button.clicked.connect(funktion)
         ziel_layout.addWidget(button)
         return button
@@ -341,3 +359,75 @@ class UI_Aufbau_Mixin:
             button.move(oben_rechts.x() - button.width() - rand + 1, y)
             button.raise_()
             y += button.height() + rand
+
+    # ---------- Knopfgroessen ----------
+    # self.knopf_groessen: {"links": 100, "nav": 100, "pikto": 100} in Prozent
+
+    def _skaliert(self, wert, gruppe):
+        return max(1, round(wert * self.knopf_groessen[gruppe] / 100))
+
+    def _nav_breite(self):
+        return self._skaliert(k.NAV_KNOPF_BREITE, "nav")
+
+    def _patient_icon(self):
+        return self._skaliert(k.PATIENT_ICON, "nav")
+
+    def _pikto_groesse(self):
+        return self._skaliert(k.PIKTO_GROESSE, "pikto")
+
+    def _pikto_icon(self):
+        return self._skaliert(k.PIKTO_ICON, "pikto")
+
+    def _seiten_widget_merken(self, widget, breite, hoehe=None):
+        # Alles in der linken Spalte, was mit "Knoepfe links" mitwachsen soll.
+        # Gemerkt wird die Groesse bei 100 %, damit man spaeter neu rechnen kann.
+        # Ohne Hoehe nur die Breite, die Hoehe ergibt sich dann aus der Schrift.
+        self._seiten_widgets.append((widget, breite, hoehe))
+        self._seiten_widget_groesse_setzen(widget, breite, hoehe)
+
+    def _seiten_widget_groesse_setzen(self, widget, breite, hoehe):
+        if hoehe is None:
+            widget.setFixedWidth(self._skaliert(breite, "links"))
+        else:
+            widget.setFixedSize(self._skaliert(breite, "links"), self._skaliert(hoehe, "links"))
+
+    def _farbwahl_merken(self, farbwahl):
+        # Vorschau und Pipette sind so breit wie die Knoepfe darueber und
+        # sollen buendig bleiben. Die kleinen Farbfelder bleiben wie sie sind.
+        farbwahl.button_pipette.setObjectName("seiten_knopf")
+        self._seiten_widget_merken(farbwahl.vorschau, k.KNOPF_BREITE, 40)
+        self._seiten_widget_merken(farbwahl.button_pipette, k.KNOPF_BREITE, 40)
+
+    def _seitenspalten_breiten_setzen(self):
+        # Beide Seitenspalten so breit wie ihr Inhalt, aber hoechstens
+        # SEITENSPALTE_MAX_ANTEIL der Fensterbreite. Was nicht passt, wird
+        # gescrollt. Ohne Grenze wuerden grosse Knoepfe das Fenster ueber den
+        # Bildschirm hinaus aufziehen.
+        if getattr(self, "knopf_bereich", None) is None or getattr(self, "nav_spalte", None) is None:
+            return
+        max_breite = int(self.width() * k.SEITENSPALTE_MAX_ANTEIL)
+        leiste = self.nav_spalte.verticalScrollBar().sizeHint().width()
+
+        # Rand | Piktogramm | Abstand | Avatar | Rand, plus die fest reservierte Scrollleiste
+        nav_inhalt = k.NAV_ABSTAND + self._pikto_groesse() + k.NAV_ABSTAND + self._nav_breite() + k.NAV_ABSTAND
+        self.nav_spalte.setFixedWidth(min(nav_inhalt + leiste, max_breite))
+
+        # Platz fuer die senkrechte Leiste immer mitrechnen. Taucht sie auf,
+        # wuerde sie sonst Breite wegnehmen und gleich noch eine waagrechte erzwingen.
+        knopf_inhalt = self.knopf_spalte.sizeHint().width() + leiste
+        self.knopf_bereich.setFixedWidth(min(knopf_inhalt, max_breite))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Die Obergrenze haengt an der Fensterbreite
+        self._seitenspalten_breiten_setzen()
+
+    def _knopf_groessen_anwenden(self, nav_neu_bauen=True):
+        for widget, breite, hoehe in self._seiten_widgets:
+            self._seiten_widget_groesse_setzen(widget, breite, hoehe)
+        # Die Schriften haengen am App-Stylesheet, also das neu setzen
+        QApplication.instance().setStyleSheet(QSS + knopf_groessen_qss(self.knopf_groessen))
+        self._seitenspalten_breiten_setzen()
+        if nav_neu_bauen:
+            # Die Nav-Knoepfe lesen ihre Groesse beim Bauen, also neu bauen
+            self._nav_aktualisieren()

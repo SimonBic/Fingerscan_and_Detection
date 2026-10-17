@@ -117,6 +117,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         self.einstellungen = QSettings(k.EINSTELLUNGEN_FIRMA, k.EINSTELLUNGEN_APP)
         self.root_ordner = self.einstellungen.value(k.ROOT_ORDNER_SCHLUESSEL, "")
+        self.knopf_groessen = self._knopf_groessen_lesen()
+        self._seiten_widgets = []
 
         # aktueller_ordner, aktuelle_teile, aktuelles_hand_mesh und plotter
         # gehoeren jetzt dem aktiven Viewer, siehe Properties unten
@@ -212,6 +214,22 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     @aktuelles_hand_mesh.setter
     def aktuelles_hand_mesh(self, wert):
         self._aktive_kachel().hand_mesh = wert
+
+    def _knopf_groessen_lesen(self):
+        groessen = {}
+        for gruppe, schluessel in k.KNOPF_GROESSEN_SCHLUESSEL.items():
+            try:
+                wert = int(self.einstellungen.value(schluessel, 100))
+            except (TypeError, ValueError):
+                wert = 100
+            # Ohne Fortgeschrittenen Modus nur 50 bis 200 %, auch wenn noch
+            # ein Wert von frueher mit Haken gespeichert ist
+            if self._fortgeschrittener_modus():
+                untere, obere = k.KNOPF_GROESSE_FORTGESCHRITTEN_MIN, k.KNOPF_GROESSE_FORTGESCHRITTEN_MAX
+            else:
+                untere, obere = k.KNOPF_GROESSE_MIN, k.KNOPF_GROESSE_MAX
+            groessen[gruppe] = min(max(wert, untere), obere)
+        return groessen
 
     def _fortgeschrittener_modus(self):
         # Standardmaessig aus, dann gehen hoechstens 9 Viewer
@@ -375,16 +393,28 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # Screen, nur zusaetzlich mit der Anzahl der Viewer
         ergebnis = root_ordner_waehlen(self, self.root_ordner,
                                        viewer_anzahl=len(self.viewer_raster.kacheln),
-                                       fortgeschritten=self._fortgeschrittener_modus())
+                                       fortgeschritten=self._fortgeschrittener_modus(),
+                                       knopf_groessen=self.knopf_groessen,
+                                       groessen_gekoppelt=self.einstellungen.value(
+                                           k.KNOPF_GROESSEN_GEKOPPELT_SCHLUESSEL, False, type=bool))
         if ergebnis is None:
             return
         self.root_ordner = ergebnis["pfad"]
         self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, ergebnis["pfad"])
         self._root_ordner_anwenden()
-        # Den Modus nur speichern, wenn die Anzahl auch uebernommen wurde.
-        # Sonst stuende z.B. "aus" drin, waehrend noch 20 Viewer offen sind.
-        if self._viewer_anzahl_anwenden(ergebnis["viewer_anzahl"]):
-            self.einstellungen.setValue(k.FORTGESCHRITTEN_SCHLUESSEL, ergebnis["fortgeschritten"])
+        # Den Modus immer speichern, die Knopfgroessen haengen auch daran.
+        # Wird die Anzahl gerade abgelehnt (Arbeitsschritt laeuft), bleiben
+        # die Viewer bis zum naechsten Mal offen, beim Neustart wird dann
+        # ohnehin auf die erlaubte Anzahl begrenzt.
+        self.einstellungen.setValue(k.FORTGESCHRITTEN_SCHLUESSEL, ergebnis["fortgeschritten"])
+        self._viewer_anzahl_anwenden(ergebnis["viewer_anzahl"])
+        self.einstellungen.setValue(k.KNOPF_GROESSEN_GEKOPPELT_SCHLUESSEL, ergebnis["groessen_gekoppelt"])
+        if ergebnis["knopf_groessen"] != self.knopf_groessen:
+            self.knopf_groessen = ergebnis["knopf_groessen"]
+            for gruppe, wert in self.knopf_groessen.items():
+                self.einstellungen.setValue(k.KNOPF_GROESSEN_SCHLUESSEL[gruppe], wert)
+            self._knopf_groessen_anwenden()
+            print(f"Button sizes changed: {self.knopf_groessen}")
         print("settings loaded succesfully.")
 
     def _root_ordner_anwenden(self):
@@ -533,8 +563,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         knopf = QToolButton()
         knopf.setObjectName("patient_knopf")
         knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NAV_KNOPF_BREITE)
-        knopf.setIconSize(QSize(44, 44))
+        knopf.setFixedSize(self._nav_breite(), self._nav_breite())
+        knopf.setIconSize(QSize(self._patient_icon(), self._patient_icon()))
         knopf.setIcon(QIcon(str(k.ICON_ORDNER / "add_patient.svg")))
         knopf.setText("Neu")
         knopf.setToolTip("Neuen Patienten anlegen")
@@ -545,7 +575,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         z_layout.setContentsMargins(0, 0, 0, 0)
         z_layout.setSpacing(0)
         # Platz der Patienten-Piktogramme freihalten -> buendig mit den Avataren
-        z_layout.addSpacing(k.PIKTO_GROESSE + k.NAV_ABSTAND)
+        z_layout.addSpacing(self._pikto_groesse() + k.NAV_ABSTAND)
         z_layout.addWidget(knopf)
         self.nav_layout.addWidget(zeile, alignment=Qt.AlignLeft)
 
@@ -773,8 +803,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # Avatar-Knopf
         patient_knopf = QToolButton()
         patient_knopf.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-        patient_knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NAV_KNOPF_BREITE)
-        patient_knopf.setIconSize(QSize(44, 44))
+        patient_knopf.setFixedSize(self._nav_breite(), self._nav_breite())
+        patient_knopf.setIconSize(QSize(self._patient_icon(), self._patient_icon()))
         patient_knopf.setIcon(QIcon(str(k.ICON_ORDNER / "person.svg")))
         patient_knopf.setText(patient_name)
         patient_knopf.setObjectName("patient_knopf")
@@ -788,7 +818,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # Senkrechte Spalte fuer alles, was den ganzen Patienten betrifft
         # (3D-Verlauf, 2D-Heatmap). Zwei Knoepfe passen neben den Avatar.
         patient_piktos = QWidget()
-        patient_piktos.setFixedWidth(k.PIKTO_GROESSE)
+        patient_piktos.setFixedWidth(self._pikto_groesse())
         pp_layout = QVBoxLayout(patient_piktos)
         pp_layout.setContentsMargins(0, 0, 0, 0)
         pp_layout.setSpacing(k.NAV_ABSTAND)
@@ -811,7 +841,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         uc_layout.setVerticalSpacing(3)
         # Spalte 0 behaelt ihre Breite auch wenn die Piktogramme versteckt
         # sind - sonst springt der Untersuchungs-Knopf beim Aufklappen zur Seite.
-        uc_layout.setColumnMinimumWidth(0, k.PIKTO_GROESSE)
+        uc_layout.setColumnMinimumWidth(0, self._pikto_groesse())
         untersuchungen_container.setVisible(False)
         self.nav_layout.addWidget(untersuchungen_container, alignment=Qt.AlignLeft)
 
@@ -822,8 +852,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # Unter der letzten Untersuchung: neuen Scan hinzufuegen
         neu_knopf = QToolButton()
         neu_knopf.setObjectName("untersuchung_neu_knopf")
-        neu_knopf.setFixedSize(k.NAV_KNOPF_BREITE, k.NEU_UNTERSUCHUNG_HOEHE)
-        neu_knopf.setIconSize(QSize(k.NAV_KNOPF_BREITE, k.NEU_UNTERSUCHUNG_HOEHE))
+        neu_knopf.setFixedSize(self._nav_breite(), self._skaliert(k.NEU_UNTERSUCHUNG_HOEHE, "nav"))
+        neu_knopf.setIconSize(QSize(self._nav_breite(), self._skaliert(k.NEU_UNTERSUCHUNG_HOEHE, "nav")))
         neu_knopf.setIcon(QIcon(str(k.ICON_ORDNER / "add_Untersuchung.svg")))
         neu_knopf.setToolTip("Neuen Scan hinzufügen")
         neu_knopf.clicked.connect(lambda _, po=patient_ordner: self.neuer_scan_klick(po))
@@ -870,8 +900,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
     def _patient_pikto(self, icon_datei, tooltip, slot):
         knopf = QToolButton()
         knopf.setObjectName("pikto_knopf")
-        knopf.setIconSize(QSize(k.PIKTO_ICON, k.PIKTO_ICON))
-        knopf.setFixedSize(k.PIKTO_GROESSE, k.PIKTO_GROESSE)
+        knopf.setIconSize(QSize(self._pikto_icon(), self._pikto_icon()))
+        knopf.setFixedSize(self._pikto_groesse(), self._pikto_groesse())
         knopf.setIcon(QIcon(str(k.ICON_ORDNER / icon_datei)))
         knopf.setToolTip(tooltip)
         knopf.clicked.connect(slot)
@@ -893,7 +923,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             u_knopf = QPushButton("U?\nohne Angabe")
             print(f"Examination {basis} has no number and no time saved, listed as unknown")
         u_knopf.setObjectName("untersuchung_knopf")
-        u_knopf.setFixedWidth(k.NAV_KNOPF_BREITE)
+        u_knopf.setFixedWidth(self._nav_breite())
         if nummer and zeit:
             u_knopf.setToolTip(f"Untersuchung {nummer}; {zeit} {dialog_text}\nOrdner: {basis}")
         else:
@@ -931,8 +961,8 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         for typ_label, pfad in typen.items():
             pikto = QToolButton()
             pikto.setObjectName("pikto_knopf")
-            pikto.setIconSize(QSize(k.PIKTO_ICON, k.PIKTO_ICON))
-            pikto.setFixedSize(k.PIKTO_GROESSE, k.PIKTO_GROESSE)
+            pikto.setIconSize(QSize(self._pikto_icon(), self._pikto_icon()))
+            pikto.setFixedSize(self._pikto_groesse(), self._pikto_groesse())
             pikto.setToolTip(typ_label)
             if typ_label.startswith("vermessen"):
                 pikto.setIcon(QIcon(str(k.ICON_ORDNER / "vermessen.svg")))
@@ -1963,6 +1993,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         return np.array(picker.GetPickPosition())
 
     def eventFilter(self, obj, event):
+        # Der Filter haengt schon, bevor es den Viewer gibt, deshalb die
+        # Knopfspalte ganz vorne abhandeln und nicht weiter unten nachfragen
+        if obj is self.knopf_spalte:
+            if event.type() == QEvent.LayoutRequest:
+                self._seitenspalten_breiten_setzen()
+            return super().eventFilter(obj, event)
+
         if obj in (self.viewer_spalte, self.viewer_raster) and event.type() == QEvent.Resize:
             self._positioniere_overlay_buttons()                             
             return super().eventFilter(obj, event)   

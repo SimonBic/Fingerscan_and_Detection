@@ -1,3 +1,6 @@
+import konstanten as k
+
+
 QSS = """
 QMainWindow, QWidget {
     background-color: #F5F7FA;
@@ -292,4 +295,17 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: transparent;
 }
+"""
+
+
+def knopf_groessen_qss(prozent):
+    # Schriftgroessen passend zu den eingestellten Knopfgroessen. Kommt hinter
+    # QSS, bei gleichem Selektor gewinnt die spaetere Regel.
+    def px(basis, gruppe):
+        return max(6, round(basis * prozent[gruppe] / 100))
+    return f"""
+QPushButton#seiten_knopf {{ font-size: {px(k.SEITEN_KNOPF_SCHRIFT, "links")}px; }}
+QCheckBox#anteil_checkbox {{ font-size: {px(k.ANTEIL_SCHRIFT, "links")}px; }}
+QToolButton#patient_knopf {{ font-size: {px(k.NAV_SCHRIFT, "nav")}px; }}
+QPushButton#untersuchung_knopf {{ font-size: {px(k.NAV_SCHRIFT, "nav")}px; }}
 """
