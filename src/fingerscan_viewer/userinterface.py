@@ -1262,6 +1262,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             print("Finger isolation needs a loaded scan")
             return
+        self.hinweis_label.setText("Finger isolieren: bitte Modus wählen (automatisch oder manuell)")
         print("Finger isolation started, choose automatic or manual settings")
         self.zeige_basis_mesh_neu()
         self.button_automatisch.setVisible(True)

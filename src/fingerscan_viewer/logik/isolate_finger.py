@@ -670,16 +670,27 @@ def isolate_finger(path: str,
         plotter.reset_camera()
 
         punkte = []
+        kugel_radius = hand_mesh.length * k.ISOLIEREN_KUGEL_ANTEIL
         def punkt_callback(point, picker):
             punkte.append(np.array(point))
             print(f"Punkt {len(punkte)} gewählt bei: {point}")
+            # Kugel statt flachem Punkt, der war je nach Blickwinkel kaum zu
+            # sehen. Ab dem dritten Klick grau, es zaehlen nur die ersten zwei.
+            if len(punkte) <= len(k.ISOLIEREN_KUGEL_FARBEN):
+                farbe = k.ISOLIEREN_KUGEL_FARBEN[len(punkte) - 1]
+            else:
+                farbe = k.ISOLIEREN_KUGEL_UEBERZAEHLIG
+                print(f"Point {len(punkte)} is not used, only the first two points count")
+            # pickable=False: sonst trifft der naechste Klick die Kugel statt den Finger
+            plotter.add_mesh(p_v.Sphere(radius=kugel_radius, center=point), color=farbe,
+                             smooth_shading=True, pickable=False, name=f"isolieren_kugel_{len(punkte)}", opacity=0.5)
 
         #Falls vorher noch ein Picking aktiv war (z.B. vom Zeichnen), wirft
         #pyvista sonst einen PyVistaPickingError
         plotter.disable_picking()
         print("disabled picking in plotter, meaning cleanup")
         plotter.enable_point_picking(
-            callback=punkt_callback, use_picker=True, show_point=True, color="red", point_size=15
+            callback=punkt_callback, use_picker=True, show_point=False
         )
         print("enabled picking in plotter, now new and clean")
 

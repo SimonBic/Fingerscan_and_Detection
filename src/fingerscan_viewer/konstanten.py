@@ -282,6 +282,11 @@ ANTEIL_CHECKBOX_GESPERRT = ("Nur bei einem isolierten Finger möglich. Bei einem
 # Nach oben ist bis ~100 mm Luft, bevor ueberhaupt der erste Punkt des
 # Nachbarfingers erreicht wird.
 PCA_RADIUS = 40.0                  # mm, entlang der Oberflaeche
+# Kugeln an den angeklickten Fingerspitzen beim Finger isolieren. Radius als
+# Anteil der Scan-Diagonale, so passt die Groesse bei Hand und Einzelfinger.
+ISOLIEREN_KUGEL_ANTEIL = 0.01
+ISOLIEREN_KUGEL_FARBEN = ["red", "blue"]   # 1. verletzter Finger, 2. Nachbarfinger
+ISOLIEREN_KUGEL_UEBERZAEHLIG = "gray"      # weitere Klicks zaehlen nicht
 
 # Scan-Artefakte: einzelne Dreiecke ueberbruecken bis zu 65 mm und wuerden
 # den kuerzesten Weg quer durch die Hand springen lassen. 5 mm trennt die
