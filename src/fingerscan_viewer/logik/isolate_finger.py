@@ -550,7 +550,12 @@ def berechne_finale_ausrichtung(normale: np.ndarray, achsen_punkt: np.ndarray, k
     return transform
 
 
-def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: list) -> Path:
+def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: list,
+                                ersetzen_erlaubt=None) -> Path | None:
+    # Je Scan gibt es hoechstens einen isolierten Finger. Liegt schon einer da,
+    # entscheidet ersetzen_erlaubt(ziel_ordner): True = der Aufrufer hat den
+    # alten weggeraeumt, neu speichern. False = alten behalten, dann wird hier
+    # nichts geschrieben und None zurueckgegeben.
     scan_ordner = Path(scan_ordner_pfad)
     originale_scans_ordner = scan_ordner.parent
     patienten_ordner = originale_scans_ordner.parent
@@ -561,6 +566,9 @@ def speichere_isolierten_finger(scan_ordner_pfad: str, texture_teile_isoliert: l
     ziel_name = scan_ordner.name + "_isoliert"
     ziel_ordner = isolierte_scans_ordner / ziel_name
     return_ordner = ziel_ordner
+    if ziel_ordner.exists() and ersetzen_erlaubt is not None and not ersetzen_erlaubt(ziel_ordner):
+        print(f"Isolated finger {ziel_name} already exists and is kept, the new one is not saved")
+        return None
     ziel_ordner.mkdir(exist_ok=True)
  
     save_path = ziel_ordner / f"{ziel_name}.obj"
@@ -654,11 +662,20 @@ def speichere_isolate_finger_parameter(
 
 def isolate_finger(path: str,
                 plotter = None,
-                radius_faktor = 2.0,
-                laengen_faktor = 0.8,
-                unterschreitung = 0.45,
-                pca_radius = k.PCA_RADIUS,
-                zeige_zwischenschritte = True):
+                radius_faktor = k.ISOLIEREN_STANDARD_WERTE["radius_faktor"],
+                laengen_faktor = k.ISOLIEREN_STANDARD_WERTE["laengen_faktor"],
+                unterschreitung = k.ISOLIEREN_STANDARD_WERTE["unterschreitung"],
+                pca_radius = k.ISOLIEREN_STANDARD_WERTE["pca_radius"],
+                zeige_zwischenschritte = True,
+                bei_punkt_gesetzt = None,
+                bei_punkt_abgelehnt = None,
+                ersetzen_erlaubt = None):
+    # bei_punkt_gesetzt(anzahl): wird nach jedem Klick auf eine Fingerspitze
+    # aufgerufen, damit die Oberflaeche ihren Hinweis anpassen kann.
+    # bei_punkt_abgelehnt(abstand): der zweite Punkt lag zu nah am ersten
+    # und wurde nicht gesetzt.
+    # ersetzen_erlaubt(ziel_ordner): siehe speichere_isolierten_finger. Gibt
+    # sie False zurueck, endet der Ablauf mit None statt mit dem Ordner.
     path = Path(path)
 
     texture_teile = load_teilmeshe_mit_textur(path)
@@ -672,6 +689,15 @@ def isolate_finger(path: str,
         punkte = []
         kugel_radius = hand_mesh.length * k.ISOLIEREN_KUGEL_ANTEIL
         def punkt_callback(point, picker):
+            # Zweiter Punkt (fast) auf dem ersten: die Richtung zwischen den
+            # Fingerspitzen waere nicht bestimmbar, also gar nicht erst setzen
+            if len(punkte) == 1:
+                abstand = float(np.linalg.norm(np.array(point) - punkte[0]))
+                if abstand <= k.ISOLIEREN_MIN_ABSTAND_MM:
+                    print(f"Second point only {abstand:.1f} mm away from the first, not set")
+                    if bei_punkt_abgelehnt is not None:
+                        bei_punkt_abgelehnt(abstand)
+                    return
             punkte.append(np.array(point))
             print(f"Punkt {len(punkte)} gewählt bei: {point}")
             # Kugel statt flachem Punkt, der war je nach Blickwinkel kaum zu
@@ -684,6 +710,8 @@ def isolate_finger(path: str,
             # pickable=False: sonst trifft der naechste Klick die Kugel statt den Finger
             plotter.add_mesh(p_v.Sphere(radius=kugel_radius, center=point), color=farbe,
                              smooth_shading=True, pickable=False, name=f"isolieren_kugel_{len(punkte)}", opacity=0.5)
+            if bei_punkt_gesetzt is not None:
+                bei_punkt_gesetzt(len(punkte))
 
         #Falls vorher noch ein Picking aktiv war (z.B. vom Zeichnen), wirft
         #pyvista sonst einen PyVistaPickingError
@@ -694,7 +722,21 @@ def isolate_finger(path: str,
         )
         print("enabled picking in plotter, now new and clean")
 
-        yield   # Nutzer klickt jetzt 2 Punkte, dann "Fertig markiert"/"Weiter"
+        def letzten_punkt_entfernen():
+            # Fuer "Letzte Markierung zuruecknehmen": letzten Klick samt Kugel
+            # weg. Gibt zurueck, wie viele Punkte noch da sind, None wenn
+            # keiner mehr da war.
+            if not punkte:
+                return None
+            nummer = len(punkte)
+            punkte.pop()
+            plotter.remove_actor(f"isolieren_kugel_{nummer}", reset_camera=False, render=True)
+            print(f"Point {nummer} taken back, {len(punkte)} left")
+            return len(punkte)
+
+        # Nutzer klickt jetzt 2 Punkte, dann "Fertig markiert"/"Weiter".
+        # Die Oberflaeche bekommt dafuer die Funktion zum Zuruecknehmen.
+        yield letzten_punkt_entfernen
 
         plotter.disable_picking()
 
@@ -708,6 +750,10 @@ def isolate_finger(path: str,
         hurt_finger, second_finger = pick_finger_point(my_p_v_plotter, hand_mesh)
     if (hurt_finger is None) or (second_finger is None):
         raise ValueError("Ungenügend Fingerspitzen gewählt")
+    # Auch hier pruefen, falls jemand ohne die Oberflaeche aufruft
+    if np.linalg.norm(second_finger - hurt_finger) <= k.ISOLIEREN_MIN_ABSTAND_MM:
+        raise ValueError(f"Die beiden Fingerspitzen liegen nicht mehr als "
+                         f"{k.ISOLIEREN_MIN_ABSTAND_MM:.0f} mm auseinander.")
     
     print("Finger korrekt gewählt.")
     print(f"Koordinaten des verlzten Fingers: {hurt_finger}")
@@ -795,7 +841,7 @@ def isolate_finger(path: str,
         iso_finger_plotter.show()
 
     #Finger speichern
-    markierungsordner = speichere_isolierten_finger(path, texture_teile_isoliert)
+    markierungsordner = speichere_isolierten_finger(path, texture_teile_isoliert, ersetzen_erlaubt)
 
     return markierungsordner
 

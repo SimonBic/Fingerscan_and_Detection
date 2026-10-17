@@ -287,6 +287,42 @@ PCA_RADIUS = 40.0                  # mm, entlang der Oberflaeche
 ISOLIEREN_KUGEL_ANTEIL = 0.01
 ISOLIEREN_KUGEL_FARBEN = ["red", "blue"]   # 1. verletzter Finger, 2. Nachbarfinger
 ISOLIEREN_KUGEL_UEBERZAEHLIG = "gray"      # weitere Klicks zaehlen nicht
+# Die beiden Fingerspitzen muessen weiter auseinander liegen, sonst ist die
+# Richtung zwischen ihnen nicht bestimmbar (Doppelklick auf dieselbe Stelle)
+ISOLIEREN_MIN_ABSTAND_MM = 5.0
+# Ellipsoid-Werte, wenn fuer den Patienten noch nichts gespeichert ist. Gilt
+# fuer die Automatik und als Startstellung der Regler bei "Selbst justieren".
+ISOLIEREN_STANDARD_WERTE = {
+    "radius_faktor": 2.0,
+    "laengen_faktor": 0.8,
+    "unterschreitung": 0.45,
+    "pca_radius": PCA_RADIUS,
+}
+# Hinweis beim Anklicken der Fingerspitzen, je nachdem wie viele schon gesetzt sind
+ISOLIEREN_HINWEISE = {
+    0: "Bitte die Fingerspitze des verletzten Fingers rechtsklicken.",
+    1: "Bitte jetzt die Fingerspitze des benachbarten Fingers rechtsklicken.",
+    2: "Beide Fingerspitzen markiert. Bitte auf 'Fertig markiert' klicken.",
+}
+ISOLIEREN_HINWEIS_ZU_VIELE = ("Es zählen nur die ersten zwei Markierungen.\nDie grauen bitte mit "
+                              "'Letzte Markierung zurücknehmen' entfernen, dann auf 'Fertig markiert' klicken.")
+ISOLIEREN_HINWEIS_ENTFERNT = "Markierung entfernt. "   # kommt vor den Hinweis
+ISOLIEREN_ZU_NAH_HINWEIS = ("Der zweite Punkt lag nur {abstand:.1f} mm neben dem ersten (mindestens "
+                            "{minimum:.0f} mm) und wurde nicht gesetzt.\n"
+                            "Bitte jetzt die Fingerspitze des benachbarten Fingers rechtsklicken.")
+ISOLIEREN_LADEN_HINWEIS = "Scan wird für das Isolieren vorbereitet, bitte warten ..."
+ISOLIEREN_ACHSE_HINWEIS = "Fingerachse wird berechnet, bitte warten ..."
+ISOLIEREN_ELLIPSOID_HINWEIS = ("Ellipsoid mit den Reglern einstellen: der verletzte Finger soll ganz drin "
+                               "liegen, der Nachbarfinger nicht.\nDann auf 'Bestätigen' klicken.")
+ISOLIEREN_RECHNEN_HINWEIS = "Finger wird ausgeschnitten und gespeichert, bitte warten ..."
+ISOLIEREN_FERTIG_HINWEIS = "Finger isoliert und gespeichert: {name}"
+ISOLIEREN_VERWORFEN_HINWEIS = "Neuer Finger verworfen, der bisherige isolierte Finger bleibt."
+
+# Ladeanzeige ueber dem Viewer, solange im Hintergrund gerechnet wird
+LADEKREIS_FARBE = "#4A90D9"
+LADEKREIS_GRAD_PRO_BILD = 6       # bei 16 ms je Bild eine Umdrehung pro Sekunde
+LADE_HINTERGRUND = "#F5F7FA"      # wie der Viewer-Hintergrund
+LADE_VIEWER_DECKKRAFT = 0.5       # Viewer-Standbild hinter dem Kreis
 
 # Scan-Artefakte: einzelne Dreiecke ueberbruecken bis zu 65 mm und wuerden
 # den kuerzesten Weg quer durch die Hand springen lassen. 5 mm trennt die

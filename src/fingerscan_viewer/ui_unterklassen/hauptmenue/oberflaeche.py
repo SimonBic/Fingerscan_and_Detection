@@ -75,6 +75,10 @@ class UI_Aufbau_Mixin:
 
         self.button_weiter = self._knopf("Weiter", self.weiter_klick, wahl_layout)
         self.button_weiter.setVisible(False)
+        # Nur solange die Fingerspitzen angeklickt werden
+        self.button_markierung_zurueck = self._knopf(
+            "Letzte Markierung\nzurücknehmen", self.isolieren_markierung_zurueck_klick, wahl_layout)
+        self.button_markierung_zurueck.setVisible(False)
         self.knopf_layout.addWidget(self.isolieren_wahl_container)
         self.isolieren_wahl_container.setVisible(False)
 

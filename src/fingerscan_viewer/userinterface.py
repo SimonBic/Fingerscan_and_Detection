@@ -94,6 +94,8 @@ from ui_unterklassen.titelbildschirm.titel_bildschirm import TitelBildschirm
 from ui_unterklassen.hilfe.anleitungfenster import AnleitungFenster
 from ui_unterklassen.terminal.terminal_fenster import TerminalFenster
 from ui_unterklassen.hauptmenue.root_ordner_dialog import root_ordner_waehlen
+from ui_unterklassen.hauptmenue.hintergrund_arbeit import Arbeiter, HauptthreadAufruf, PlotterVertreter
+from ui_unterklassen.hauptmenue.ladeanzeige import Ladeanzeige
 import konstanten as k
 
 
@@ -138,6 +140,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self._genesungsverlauf_mesh_fuer_klick = None
         self._anleitung_fenster = None
         self._terminal_fenster = None
+        # Rechnungen im Hintergrund (Finger isolieren), siehe _im_hintergrund
+        self._hauptthread = HauptthreadAufruf(self)
+        self._arbeiter = None
+        self._ladeanzeige = None
 
         # Zuerst der Title Screen im selben Fenster. Die eigentliche Oberflaeche
         # (mit dem teuren VTK-Viewer) entsteht erst bei "Software starten" -
@@ -386,6 +392,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self._pipette_aktiv = False
         self.plotter.interactor.removeEventFilter(self)
         self.plotter.interactor.unsetCursor()
+        self.hinweis_label.setText("Hauptmenü: Bitte einen Scan laden, eine Funktion wählen oder einen neuen Patienten anlegen.")
         print("Main Menu loaded succesfully")
 
     def einstellungen_oeffnen(self):
@@ -1249,7 +1256,122 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.aktueller_ellipsoid_actor = None
         self.button_weiter.setText("Weiter")
         self.button_weiter.setVisible(False)
+        self._markieren_beenden()
         self.ellipsoid_einstellen_container.setVisible(False)
+
+    def _markieren_beenden(self):
+        # Die Fingerspitzen sind fertig angeklickt (oder abgebrochen), ab
+        # jetzt gibt es nichts mehr zurueckzunehmen
+        self._isolieren_punkt_entfernen = None
+        self.button_markierung_zurueck.setVisible(False)
+        # Sonst bleibt der Knopf beim naechsten Mal ausgegraut
+        self.button_weiter.setEnabled(True)
+
+    def _isolieren_hinweis_zeigen(self, anzahl, entfernt=False):
+        # Immer nur der naechste Schritt: erst der verletzte Finger, dann der
+        # Nachbar, dann 'Fertig markiert'. Nach dem Zuruecknehmen dasselbe,
+        # nur mit "Markierung entfernt." davor.
+        text = k.ISOLIEREN_HINWEISE.get(anzahl, k.ISOLIEREN_HINWEIS_ZU_VIELE)
+        if entfernt:
+            text = k.ISOLIEREN_HINWEIS_ENTFERNT + text
+        self.hinweis_label.setText(text)
+        # Wird bei jeder Aenderung der Anzahl gerufen, also hier auch gleich
+        # den Knopf: 'Fertig markiert' geht nur bei genau zwei Punkten
+        self.button_weiter.setEnabled(anzahl == 2)
+
+    def _isolieren_punkt_gesetzt(self, anzahl):
+        # Wird von isolate_finger nach jedem Klick auf eine Fingerspitze gerufen
+        self._isolieren_hinweis_zeigen(anzahl)
+
+    def _isolieren_punkt_abgelehnt(self, abstand):
+        # Zweiter Punkt zu nah am ersten, isolate_finger hat ihn nicht gesetzt.
+        # Es bleibt also ein Punkt, der Knopf bleibt grau.
+        self.hinweis_label.setText(k.ISOLIEREN_ZU_NAH_HINWEIS.format(
+            abstand=abstand, minimum=k.ISOLIEREN_MIN_ABSTAND_MM))
+
+    def isolieren_markierung_zurueck_klick(self):
+        entfernen = getattr(self, "_isolieren_punkt_entfernen", None)
+        if entfernen is None:
+            return
+        uebrig = entfernen()
+        if uebrig is None:
+            self.hinweis_label.setText(
+                "Es gibt keine Markierung zum Zurücknehmen. " + k.ISOLIEREN_HINWEISE[0])
+            print("Nothing to take back, no fingertip marked yet")
+            return
+        self._isolieren_hinweis_zeigen(uebrig, entfernt=True)
+
+    def _isolierten_finger_ersetzen_fragen(self, ziel_ordner):
+        # Wird von speichere_isolierten_finger gerufen, wenn es fuer diesen
+        # Scan schon einen isolierten Finger gibt. Es bleibt immer nur einer.
+        # True: alter ist in den Papierkorb geraeumt, neuer wird gespeichert.
+        # False: alter bleibt, neuer wird verworfen.
+        ziel_ordner = Path(ziel_ordner)
+        patient = ziel_ordner.parent.parent
+        # Kommt mitten aus der Rechnung im Hintergrund. Fuer die Frage soll man
+        # den neuen Finger im Viewer sehen, nicht die Ladeanzeige.
+        laedt = self._ladeanzeige is not None
+        self._ladeanzeige_verbergen()
+
+        if any(ziel_ordner.glob("*.obj")):
+            # Was auf dem alten Finger aufbaut, passt nach dem Ersetzen nicht
+            # mehr genau zur neuen Geometrie
+            abhaengig = []
+            if (patient / "markierte_scans" / f"{ziel_ordner.name}_marked").is_dir():
+                abhaengig.append("eine Markierung")
+            if (patient / "vermessene_scans" / f"{ziel_ordner.name}_vermessen").is_dir():
+                abhaengig.append("eine Vermessung")
+
+            frage = QMessageBox(self)
+            frage.setWindowTitle("Isolierter Finger existiert bereits")
+            frage.setIcon(QMessageBox.Question)
+            frage.setText(
+                f"Für diesen Scan gibt es schon einen isolierten Finger ({ziel_ordner.name}).\n"
+                "Es wird immer nur einer aufbewahrt. Welcher soll bleiben?\n\n"
+                "Der neue Finger ist gerade im Viewer zu sehen. Der alte kommt in den Papierkorb.")
+            if abhaengig:
+                frage.setInformativeText(
+                    f"Achtung: Auf dem alten Finger gibt es schon {' und '.join(abhaengig)}. "
+                    "Diese passen nach dem Ersetzen nicht mehr genau zum neuen Finger.")
+            knopf_neu = frage.addButton("Neuen Finger behalten", QMessageBox.AcceptRole)
+            knopf_alt = frage.addButton("Alten Finger behalten", QMessageBox.RejectRole)
+            # Im Zweifel nichts kaputt machen: Enter und Schliessen behalten den alten
+            frage.setDefaultButton(knopf_alt)
+            frage.setEscapeButton(knopf_alt)
+            # Sonst haben die Texte die 25px aus dem globalen QLabel-Stil
+            frage.setStyleSheet("QLabel { font-size: 14px; }")
+            frage.exec()
+            if frage.clickedButton() is not knopf_neu:
+                print("The user keeps the old isolated finger")
+                return False
+
+        # Alten Stand in den Papierkorb statt loeschen, wie beim Scan loeschen
+        try:
+            ziel = self._papierkorb_ziel(ziel_ordner)
+            ziel.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(ziel_ordner), str(ziel))
+        except OSError as e:
+            QMessageBox.warning(self, "Finger isolieren",
+                                f"Der alte Finger konnte nicht weggeräumt werden, er bleibt:\n{e}")
+            print(f"Moving the old isolated finger to the trash failed, it is kept: {e}")
+            return False
+        print(f"Old isolated finger moved to the trash: {ziel}")
+
+        # Zeigt ein anderer Viewer noch den alten Finger, darf er nicht auf
+        # einen Ordner zeigen, den es nicht mehr gibt
+        for kachel in self.viewer_raster.kacheln:
+            if kachel.ordner is not None and Path(kachel.ordner).resolve() == ziel_ordner.resolve():
+                kachel.leeren()
+        # Das Speichern laeuft noch weiter
+        if laedt:
+            self._ladeanzeige_zeigen()
+        return True
+
+    def _neuen_finger_verworfen(self):
+        # Zurueck zum Original, der alte isolierte Finger bleibt wie er war
+        self.lade_main_menu()
+        self.hinweis_label.setText(k.ISOLIEREN_VERWORFEN_HINWEIS)
+        print("New isolated finger discarded, the old one is kept")
 
     def _isolieren_fehlgeschlagen(self, fehler):
         #Zurueck ins Hauptmenue, sonst bleibt die Knopfleiste ausgeblendet
@@ -1262,6 +1384,16 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             self.hinweis_label.setText("Erst einen Scan laden!")
             print("Finger isolation needs a loaded scan")
             return
+        # Nur vom Original. Ein isolierter, markierter oder vermessener Scan
+        # wuerde sonst z.B. zu "X_isoliert_isoliert", das liest die Nav-Spalte
+        # als eigene Untersuchung. Erkannt wird das am Ordnernamen.
+        _, herkunft = self._scan_analysieren(Path(self.aktueller_ordner).name)
+        if herkunft != "original":
+            self.hinweis_label.setText(
+                f"Finger isolieren geht nur mit einem Original-Scan (Hand-Piktogramm), "
+                f"geladen ist: {herkunft}.")
+            print(f"Finger isolation only works on an original scan, this one is: {herkunft}")
+            return
         self.hinweis_label.setText("Finger isolieren: bitte Modus wählen (automatisch oder manuell)")
         print("Finger isolation started, choose automatic or manual settings")
         self.zeige_basis_mesh_neu()
@@ -1272,88 +1404,180 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.navigatecontainer.setVisible(True)
 
     def automatisch_klick(self):
-        self.zeige_basis_mesh_neu()
-        self.button_automatisch.setVisible(False)
-        self.button_manuell.setVisible(False)
-        self.navigatecontainer.setVisible(True)
-        ordner = Path(self.aktueller_ordner)
-        gespeichert = lade_isolate_finger_parameter(ordner)
-
-        if gespeichert:
-            print(f"Automatic isolation, using the parameters saved for this patient: {gespeichert}")
-            self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False, **gespeichert)
-        else:
-            print("Automatic isolation, no parameters saved yet for this patient, using the defaults")
-            self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=False)
-
-        self.automatisch_modus_aktiv = True
-        self.button_weiter.setText("Fertig markiert")
-        self.button_weiter.setVisible(True)
-        try:
-            next(self.isolieren_ablauf)
-        except Exception as e:
-            self._isolieren_fehlgeschlagen(e)
-            return
-        self.hinweis_label.setText(f"Bitte die Fingerspitze des verletzten Fingers rechtsklicken, dann die benachbarte Fingerspitze.\nDanach auf 'Fertig markiert' klicken.")
-        print("Right click the hurt fingertip, then the neighbouring fingertip")
+        self._isolieren_starten(manuell=False)
 
     def manuell_klick(self):
+        self._isolieren_starten(manuell=True)
+
+    def _isolieren_starten(self, manuell):
+        # Gemeinsamer Start fuer "Automatische Einstellungen" und "Selbst
+        # justieren". Unterschied: manuell kommen nach dem Markieren noch die
+        # Ellipsoid-Regler, automatisch wird gleich mit den gespeicherten
+        # Werten geschnitten.
         self.button_automatisch.setVisible(False)
         self.button_manuell.setVisible(False)
-        ordner = Path(self.aktueller_ordner)
-        self.isolieren_ablauf = isolate_finger(str(ordner), plotter=self.plotter, zeige_zwischenschritte=True)
-        self.automatisch_modus_aktiv = False
-        self.isolieren_phase = "picking"
-        self.button_weiter.setVisible(True)
         self.navigatecontainer.setVisible(True)
-        try:
-            next(self.isolieren_ablauf)
-        except Exception as e:
-            self._isolieren_fehlgeschlagen(e)
-            return
-        print("Manual isolation started, right click the hurt fingertip, then the neighbouring fingertip")
-        self.hinweis_label.setText(f"Bitte die Fingerspitze des verletzten Fingers rechtsklicken, dann die benachbarte Fingerspitze.\nDanach auf 'Fertig markiert' klicken.")
+        ordner = Path(self.aktueller_ordner)
+        gespeichert = lade_isolate_finger_parameter(ordner) or {}
+        if gespeichert:
+            print(f"Using the parameters saved for this patient: {gespeichert}")
+        else:
+            print("No parameters saved yet for this patient, using the defaults")
+        if manuell:
+            # Die Regler starten bei den Werten des Patienten, sonst beim Standard
+            self._ellipsoid_regler_setzen(gespeichert)
+
+        self.isolieren_ablauf = isolate_finger(
+            str(ordner),
+            # Der Ablauf laeuft teils im Hintergrund, seine Plotter-Aufrufe
+            # gehen ueber den Vertreter in den Hauptthread
+            plotter=PlotterVertreter(self.plotter, self._hauptthread),
+            zeige_zwischenschritte=manuell,
+            bei_punkt_gesetzt=self._isolieren_punkt_gesetzt,
+            bei_punkt_abgelehnt=self._isolieren_punkt_abgelehnt,
+            # Die Rueckfrage ist ein Fenster, also auch in den Hauptthread
+            ersetzen_erlaubt=lambda ziel: self._hauptthread(
+                lambda: self._isolierten_finger_ersetzen_fragen(ziel)),
+            **gespeichert)
+        self.automatisch_modus_aktiv = not manuell
+        self.isolieren_phase = "picking" if manuell else None
+        self.button_weiter.setText("Fertig markiert")
+        self.button_weiter.setVisible(True)
+
+        def fertig(entfernen, fehler):
+            if fehler is not None:
+                self._isolieren_fehlgeschlagen(fehler)
+                return
+            self._isolieren_punkt_entfernen = entfernen
+            self.button_markierung_zurueck.setVisible(True)
+            self._isolieren_hinweis_zeigen(0)
+            print("Right click the hurt fingertip, then the neighbouring fingertip")
+
+        # Erster Schritt: Scan laden und das Anklicken vorbereiten
+        ablauf = self.isolieren_ablauf
+        self._im_hintergrund(lambda: next(ablauf), fertig, k.ISOLIEREN_LADEN_HINWEIS)
+
+    def _ellipsoid_regler_setzen(self, werte):
+        # Fehlende Werte vom Standard. Signale aus, sonst wuerde jeder Regler
+        # schon jetzt die Vorschau rechnen wollen, die es noch gar nicht gibt.
+        werte = {**k.ISOLIEREN_STANDARD_WERTE, **werte}
+        for regler, wert in ((self.slider_radius, werte["radius_faktor"] * 100),
+                             (self.slider_laenge, werte["laengen_faktor"] * 100),
+                             (self.slider_unterschreitung, werte["unterschreitung"] * 100),
+                             (self.slider_pca_radius, werte["pca_radius"])):
+            regler.blockSignals(True)
+            regler.setValue(int(round(wert)))
+            regler.blockSignals(False)
 
     def weiter_klick(self):
+        # "Fertig markiert": beide Fingerspitzen sind gesetzt
         self.navigatecontainer.setVisible(False)
-        if getattr(self, "automatisch_modus_aktiv", False):
+        self.button_weiter.setText("Weiter")
+        self.button_weiter.setVisible(False)
+        self._markieren_beenden()
+        ablauf = self.isolieren_ablauf
+
+        if self.automatisch_modus_aktiv:
             self.automatisch_modus_aktiv = False
-            self.button_weiter.setText("Weiter")
-            self.button_weiter.setVisible(False)
             print("Isolating the finger, this takes a moment")
-            try:
-                gespeicherter_obj_pfad = generator_bis_ende(self.isolieren_ablauf)
-                self.aktueller_ordner = Path(gespeicherter_obj_pfad)
-            except Exception as e:
-                self._isolieren_fehlgeschlagen(e)
-                return
-            self.isolieren_wahl_container.setVisible(False)
-            self.haupt_buttons_container.setVisible(True)
-            print(f"Isolated finger saved in {gespeicherter_obj_pfad}")
-            self.lade_und_zeige(Path(gespeicherter_obj_pfad))
+            self._im_hintergrund(lambda: generator_bis_ende(ablauf), self._isolieren_fertig,
+                                 k.ISOLIEREN_RECHNEN_HINWEIS)
             return
 
-        if getattr(self, "isolieren_phase", None) == "picking":
-            self.isolieren_phase = "ellipsoid"
-            self.button_weiter.setVisible(False)
-            try:
-                self.ellipsoid_kontext = next(self.isolieren_ablauf)
-            except Exception as e:
-                #z.B. weniger als 2 Fingerspitzen angeklickt
-                self._isolieren_fehlgeschlagen(e)
+        # Manuell: erst die Fingerachse rechnen, dann kommen die Regler
+        self.isolieren_phase = "ellipsoid"
+
+        def fertig(kontext, fehler):
+            if fehler is not None:
+                self._isolieren_fehlgeschlagen(fehler)
                 return
+            self.ellipsoid_kontext = kontext
             self.ellipsoid_einstellen_container.setVisible(True)
+            # Auch beim Einstellen noch abbrechen koennen
+            self.navigatecontainer.setVisible(True)
+            self.hinweis_label.setText(k.ISOLIEREN_ELLIPSOID_HINWEIS)
             self.aktualisiere_ellipsoid_vorschau()
             print("Fingertips accepted, now adjust the cutting ellipsoid with the sliders")
+
+        self._im_hintergrund(lambda: next(ablauf), fertig, k.ISOLIEREN_ACHSE_HINWEIS)
+
+    def _isolieren_fertig(self, gespeicherter_obj_pfad, fehler, werte=None, original_ordner=None):
+        # Ende von Automatik und Manuell. werte: die Regler-Werte, nur manuell.
+        if fehler is not None:
+            # Die Werte werden hier bewusst NICHT gespeichert. Sonst nimmt
+            # die Automatik beim naechsten Mal genau die Werte, mit denen das
+            # Schneiden gerade gescheitert ist.
+            self._isolieren_fehlgeschlagen(fehler)
+            return
+        if gespeicherter_obj_pfad is None:
+            # Alter Finger bleibt, die Werte gehoeren zum verworfenen neuen
+            self._neuen_finger_verworfen()
             return
 
-        try:
-            next(self.isolieren_ablauf)
-        except StopIteration:
-            self.button_weiter.setVisible(False)
-            self.isolieren_wahl_container.setVisible(False)
-            self.haupt_buttons_container.setVisible(True)
-            print("Isolation workflow finished")
+        if werte is not None:
+            # Erst jetzt, wo Schneiden und Speichern geklappt haben
+            speichere_isolate_finger_parameter(original_ordner, **werte)
+            print(f"Ellipsoid values saved for the next isolation of this patient: {werte}")
+
+        self.aktueller_ordner = Path(gespeicherter_obj_pfad)
+        self.isolieren_phase = None
+        self.isolieren_wahl_container.setVisible(False)
+        self.haupt_buttons_container.setVisible(True)
+        print(f"Isolated finger saved in {gespeicherter_obj_pfad}")
+        self.lade_und_zeige(Path(gespeicherter_obj_pfad))
+        # Konnte der Finger nicht geladen werden, steht dessen Fehler schon da
+        if self.aktueller_ordner is not None:
+            self.hinweis_label.setText(k.ISOLIEREN_FERTIG_HINWEIS.format(name=Path(gespeicherter_obj_pfad).name))
+
+    # ---------- Laengere Arbeit im Hintergrund ----------
+
+    def _im_hintergrund(self, arbeit, fertig, hinweis):
+        # arbeit() laeuft in einem eigenen Thread, damit die Oberflaeche nicht
+        # einfriert und sich die Ladeanzeige drehen kann. fertig(ergebnis,
+        # fehler) kommt danach wieder im Hauptthread. Bis dahin ist die
+        # Bedienung gesperrt, sonst koennte man mitten in die Rechnung klicken.
+        self.hinweis_label.setText(hinweis)
+        self._bedienung_sperren(True)
+        self._ladeanzeige_zeigen()
+        arbeiter = Arbeiter(arbeit, self)
+
+        def ende(ergebnis, fehler):
+            self._ladeanzeige_verbergen()
+            self._bedienung_sperren(False)
+            self._arbeiter = None
+            fertig(ergebnis, fehler)
+
+        arbeiter.fertig.connect(ende)
+        arbeiter.finished.connect(arbeiter.deleteLater)
+        self._arbeiter = arbeiter
+        arbeiter.start()
+
+    def _bedienung_sperren(self, gesperrt):
+        for widget in (self.knopf_bereich, self.nav_spalte, self.button_einstellungen, self.viewer_raster):
+            widget.setEnabled(not gesperrt)
+        # Ein hineingezogener Scan wuerde sonst mitten in der Rechnung geladen
+        self.setAcceptDrops(not gesperrt)
+
+    def _ladeanzeige_zeigen(self):
+        self._ladeanzeige_verbergen()
+        # Damit das Standbild den aktuellen Stand zeigt
+        self.plotter.render()
+        self._ladeanzeige = Ladeanzeige(self.viewer_raster.aktiv)
+
+    def _ladeanzeige_verbergen(self):
+        if self._ladeanzeige is not None:
+            self._ladeanzeige.schliessen()
+            self._ladeanzeige = None
+
+    def closeEvent(self, event):
+        # Mitten in der Rechnung schliessen wuerde den Thread abwuergen, und
+        # ein halb geschriebener Finger bliebe liegen
+        if self._arbeiter is not None:
+            event.ignore()
+            self.hinweis_label.setText("Bitte warten, bis die Berechnung fertig ist.")
+            print("Closing is not possible while a calculation is running")
+            return
+        super().closeEvent(event)
 
     def aktualisiere_ellipsoid_vorschau(self):
         if self.aktueller_ellipsoid_actor is not None:
@@ -1404,31 +1628,24 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             "unterschreitung": self.slider_unterschreitung.value() / 100,
             "pca_radius": float(self.slider_pca_radius.value()),
         }
-        ordner = Path(self.aktueller_ordner)
+        original_ordner = Path(self.aktueller_ordner)
         self.ellipsoid_einstellen_container.setVisible(False)
         self.navigatecontainer.setVisible(False)
-        speichere_isolate_finger_parameter(ordner, **werte)
-        print(f"Ellipsoid confirmed and saved for the next isolation of this patient: {werte}")
+        print(f"Ellipsoid confirmed: {werte}")
         print("Cutting the finger out, this takes a moment")
+        ablauf = self.isolieren_ablauf
 
-        try:
-            self.isolieren_ablauf.send(werte)
-            self.hinweis_label.setText("Unerwarteter weiterer Zwischenschritt - bitte melden.")
-            print("Unexpected extra step in the isolation workflow, nothing was saved")
-            return
-        except StopIteration as e:
-            gespeicherter_obj_pfad = e.value
-        except Exception as e:
-            self._isolieren_fehlgeschlagen(e)
-            return
+        def schneiden():
+            try:
+                ablauf.send(werte)
+            except StopIteration as e:
+                return e.value
+            raise RuntimeError("Unerwarteter weiterer Zwischenschritt beim Isolieren, nichts gespeichert. Bitte melden.")
 
-        self.aktueller_ordner = Path(gespeicherter_obj_pfad)
-        self.isolieren_phase = None
-        self.isolieren_wahl_container.setVisible(False)
-        self.haupt_buttons_container.setVisible(True)
-
-        print(f"Isolated finger saved in {gespeicherter_obj_pfad}")
-        self.lade_und_zeige(Path(gespeicherter_obj_pfad))
+        self._im_hintergrund(
+            schneiden,
+            lambda pfad, fehler: self._isolieren_fertig(pfad, fehler, werte, original_ordner),
+            k.ISOLIEREN_RECHNEN_HINWEIS)
 
     # ---------- Zeichnen ----------
 
