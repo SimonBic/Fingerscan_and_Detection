@@ -12,11 +12,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout)
 
-from pyvistaqt import QtInteractor
-
 import konstanten as k
 from ui_unterklassen.hauptmenue.farbauswahl_widget import FarbAuswahlWidget
 from ui_unterklassen.hauptmenue.hinweis_label import HinweisLabel, HinweisBereich
+from ui_unterklassen.hauptmenue.viewer_raster import ViewerRaster
 
 
 class UI_Aufbau_Mixin:
@@ -260,9 +259,11 @@ class UI_Aufbau_Mixin:
         kopf_zeile.addWidget(self.button_einstellungen, alignment=Qt.AlignTop)
         viewer_layout.addLayout(kopf_zeile)
 
-        self.plotter = QtInteractor(self.viewer_spalte)
-        self.plotter.set_background("F5F7FA")
-        viewer_layout.addWidget(self.plotter.interactor)
+        # 1 bis 99 Viewer, self.plotter zeigt immer auf den aktiven
+        self.viewer_raster = ViewerRaster(self.viewer_spalte, self._viewer_anzahl_lesen(),
+                                          self._viewer_wechsel_erlaubt)
+        self.viewer_raster.gewechselt.connect(self._viewer_gewechselt)
+        viewer_layout.addWidget(self.viewer_raster)
         haupt_layout.addWidget(self.viewer_spalte, stretch=4)
 
         # ganz rechts, nach dem Viewer
@@ -293,6 +294,9 @@ class UI_Aufbau_Mixin:
         self.button_naechster_finger_overlay.setObjectName("overlay_button")
 
         self.viewer_spalte.installEventFilter(self)
+        # Die Kacheln im Raster haben ihre neue Groesse erst, wenn das Raster
+        # selbst umgebaut ist, deshalb auch dessen Resize mitnehmen
+        self.viewer_raster.installEventFilter(self)
         self._positioniere_overlay_buttons()
 
         # Beobachtet den geoeffneten Patienten auf der Platte: was dort neu
@@ -327,9 +331,13 @@ class UI_Aufbau_Mixin:
         return slider
 
     def _positioniere_overlay_buttons(self):
-        rand = 10
-        y = rand
+        # Oben rechts im aktiven Viewer, bei mehreren Viewern sonst ueber
+        # einem ganz anderen Scan
+        kachel = self.viewer_raster.aktiv
+        oben_rechts = kachel.mapTo(self.viewer_spalte, kachel.rect().topRight())
+        rand = 10 + k.VIEWER_RAND
+        y = oben_rechts.y() + rand
         for button in self.overlay_buttons:
-            button.move(self.viewer_spalte.width() - button.width() - rand, y)
+            button.move(oben_rechts.x() - button.width() - rand + 1, y)
             button.raise_()
             y += button.height() + rand

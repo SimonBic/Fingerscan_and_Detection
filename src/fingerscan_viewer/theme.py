@@ -139,6 +139,16 @@ QPushButton:pressed {
     border-color: #3A73AD;
 }
 
+/* Rand um jeden Viewer. Immer da, aber durchsichtig, sonst springt das
+   Raster jedes Mal, wenn ein anderer Viewer gewaehlt wird. */
+QFrame#viewer_kachel {
+    border: 3px solid transparent;
+    border-radius: 8px;
+}
+QFrame#viewer_kachel[aktiv="true"] {
+    border-color: #4A90D9;
+}
+
 QToolButton#zahnrad_knopf {
     border: none;
     background: transparent;

@@ -118,11 +118,11 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.einstellungen = QSettings(k.EINSTELLUNGEN_FIRMA, k.EINSTELLUNGEN_APP)
         self.root_ordner = self.einstellungen.value(k.ROOT_ORDNER_SCHLUESSEL, "")
 
-        self.aktueller_ordner = None
+        # aktueller_ordner, aktuelle_teile, aktuelles_hand_mesh und plotter
+        # gehoeren jetzt dem aktiven Viewer, siehe Properties unten
         self.isolieren_ablauf = None
         self.automatisch_modus_aktiv = False
         self.zeichnungs_status = {"flaeche": None, "landmarken": None, "punkte_eingezeichnet": None}
-        self.aktuelle_teile = None
         # Mehrfach-Vermessung: je Eintrag
         # {"flaeche", "flaeche_mm2", "umfang_mm", "actor", "zahl_actor"}
         self.vermessungen = []
@@ -162,14 +162,119 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             QApplication.restoreOverrideCursor()
 
     def _titel_root_ordner(self):
-        pfad = root_ordner_waehlen(self, self.root_ordner)
-        if pfad is None:
+        ergebnis = root_ordner_waehlen(self, self.root_ordner)
+        if ergebnis is None:
             return
+        pfad = ergebnis["pfad"]
         self.root_ordner = pfad
         self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, pfad)
         # Kein _root_ordner_anwenden(): die Nav-Spalte gibt es noch nicht, sie
         # wird beim Start ohnehin aus self.root_ordner gebaut
         self.titel_bildschirm.setze_root_ordner(pfad)
+
+    # ---------- Aktiver Viewer ----------
+    # Der restliche Code arbeitet weiter mit self.plotter, self.aktueller_ordner
+    # usw. Die zeigen ueber diese Properties immer auf den aktiven Viewer.
+    # Auf dem Title Screen gibt es noch keinen, dann None.
+
+    def _aktive_kachel(self):
+        raster = getattr(self, "viewer_raster", None)
+        return raster.aktiv if raster is not None else None
+
+    @property
+    def plotter(self):
+        kachel = self._aktive_kachel()
+        return kachel.plotter if kachel is not None else None
+
+    @property
+    def aktueller_ordner(self):
+        kachel = self._aktive_kachel()
+        return kachel.ordner if kachel is not None else None
+
+    @aktueller_ordner.setter
+    def aktueller_ordner(self, wert):
+        self._aktive_kachel().ordner = wert
+
+    @property
+    def aktuelle_teile(self):
+        kachel = self._aktive_kachel()
+        return kachel.teile if kachel is not None else None
+
+    @aktuelle_teile.setter
+    def aktuelle_teile(self, wert):
+        self._aktive_kachel().teile = wert
+
+    @property
+    def aktuelles_hand_mesh(self):
+        kachel = self._aktive_kachel()
+        return kachel.hand_mesh if kachel is not None else None
+
+    @aktuelles_hand_mesh.setter
+    def aktuelles_hand_mesh(self, wert):
+        self._aktive_kachel().hand_mesh = wert
+
+    def _fortgeschrittener_modus(self):
+        # Standardmaessig aus, dann gehen hoechstens 9 Viewer
+        return self.einstellungen.value(k.FORTGESCHRITTEN_SCHLUESSEL, False, type=bool)
+
+    def _viewer_anzahl_max(self):
+        return k.VIEWER_ANZAHL_MAX if self._fortgeschrittener_modus() else k.VIEWER_ANZAHL_NORMAL_MAX
+
+    def _viewer_anzahl_lesen(self):
+        try:
+            anzahl = int(self.einstellungen.value(k.VIEWER_ANZAHL_SCHLUESSEL, 1))
+        except (TypeError, ValueError):
+            anzahl = 1
+        return min(max(anzahl, 1), self._viewer_anzahl_max())
+
+    def _im_hauptmenue(self):
+        # Der Arbeitszustand (Isolieren, Zeichnen, Vermessen ...) gibt es nur
+        # einmal, er gehoert immer zum aktiven Viewer. Deshalb nur im
+        # Hauptmenue wechseln. Der 3D-Genesungsverlauf laesst das Hauptmenue
+        # sichtbar, laeuft aber noch, solange seine Overlay-Knoepfe da sind.
+        return (self.haupt_buttons_container.isVisible()
+                and not any(knopf.isVisible() for knopf in self.overlay_buttons)
+                and not getattr(self, "_pipette_aktiv", False))
+
+    def _viewer_wechsel_erlaubt(self):
+        if self._im_hauptmenue():
+            return True
+        self.hinweis_label.setText(
+            "Viewer wechseln geht nur im Hauptmenü. Erst den aktuellen Arbeitsschritt "
+            "abschließen oder 'Zurück zum Hauptmenü'.")
+        print("Switching the viewer is only possible in the main menu, finish or cancel the current step first")
+        return False
+
+    def _viewer_gewechselt(self, kachel):
+        raster = self.viewer_raster
+        if len(raster.kacheln) >= 2:
+            nummer = raster.nummer(kachel)
+            if kachel.ordner is not None:
+                self.hinweis_label.setText(
+                    f"Viewer {nummer} von {len(raster.kacheln)} gewählt: {Path(kachel.ordner).name}")
+            else:
+                self.hinweis_label.setText(
+                    f"Viewer {nummer} von {len(raster.kacheln)} gewählt, noch kein Scan geladen")
+            print(f"Viewer {nummer} of {len(raster.kacheln)} selected")
+        self._patienten_beobachten()
+        # Die neuen Kachel-Groessen stehen sonst erst nach dem naechsten
+        # Event-Durchlauf fest, die Overlay-Knoepfe saessen dann daneben
+        raster.layout().activate()
+        self._positioniere_overlay_buttons()
+
+    def _viewer_anzahl_anwenden(self, anzahl):
+        # True, wenn die Anzahl jetzt so stimmt, False wenn abgelehnt
+        if anzahl == len(self.viewer_raster.kacheln):
+            return True
+        if not self._im_hauptmenue():
+            self.hinweis_label.setText(
+                "Die Anzahl der Viewer kann nur im Hauptmenü geändert werden. "
+                "Erst den aktuellen Arbeitsschritt abschließen oder 'Zurück zum Hauptmenü'.")
+            print("The number of viewers can only be changed in the main menu, nothing changed")
+            return False
+        self.einstellungen.setValue(k.VIEWER_ANZAHL_SCHLUESSEL, anzahl)
+        self.viewer_raster.setze_anzahl(anzahl)
+        return True
 
     # ---------- kleine Bau-Helfer ----------
 
@@ -197,9 +302,18 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         urls = event.mimeData().urls()
         if not urls:
             return
-        self.aktueller_ordner = urls[0].toLocalFile()
+        # In den Viewer, auf den der Scan fallen gelassen wurde. Darf gerade
+        # nicht gewechselt werden, nicht stattdessen den aktiven ueberschreiben
+        ziel = self.viewer_raster.kachel_an(self.mapToGlobal(event.position().toPoint()))
+        if ziel is not None and ziel is not self.viewer_raster.aktiv:
+            self.viewer_raster.waehle(ziel)
+            if self.viewer_raster.aktiv is not ziel:
+                return
         pfad = Path(urls[0].toLocalFile())
         ordner = pfad.parent if pfad.is_file() else pfad
+        # Immer der Ordner, auch wenn eine einzelne Datei gezogen wurde. Alles
+        # danach (Isolieren, Speichern ...) rechnet mit einem Scan-Ordner.
+        self.aktueller_ordner = ordner
         self.lade_und_zeige(ordner)
 
     def _rendere_teile(self, teile: list) -> None:
@@ -214,7 +328,16 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         teile = load_teilmeshe_mit_textur(pfad)
 
         if not teile:
-            print("Keine gültigen Meshes gefunden.")
+            # Der Viewer ist jetzt leer, also darf auch nichts mehr auf den
+            # alten Scan zeigen. Sonst glaubt z.B. Finger isolieren, es sei
+            # ein Scan geladen, und stuerzt beim Zeichnen ab.
+            self.aktueller_ordner = None
+            self.aktuelle_teile = None
+            self.aktuelles_hand_mesh = None
+            self.hinweis_label.setText(
+                f"In '{Path(pfad).name}' liegt kein Scan (.obj). Bitte direkt den Ordner "
+                "eines Scans hineinziehen oder über die Navigationsspalte laden.")
+            print(f"No valid meshes found in {pfad}, viewer cleared")
             return
 
         self.aktuelle_teile = teile
@@ -248,13 +371,20 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         print("Main Menu loaded succesfully")
 
     def einstellungen_oeffnen(self):
-        # Zahnrad in der laufenden Software, gleicher Dialog wie auf dem Title Screen
-        pfad = root_ordner_waehlen(self, self.root_ordner)
-        if pfad is None:
+        # Zahnrad in der laufenden Software, gleicher Dialog wie auf dem Title
+        # Screen, nur zusaetzlich mit der Anzahl der Viewer
+        ergebnis = root_ordner_waehlen(self, self.root_ordner,
+                                       viewer_anzahl=len(self.viewer_raster.kacheln),
+                                       fortgeschritten=self._fortgeschrittener_modus())
+        if ergebnis is None:
             return
-        self.root_ordner = pfad
-        self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, pfad)
+        self.root_ordner = ergebnis["pfad"]
+        self.einstellungen.setValue(k.ROOT_ORDNER_SCHLUESSEL, ergebnis["pfad"])
         self._root_ordner_anwenden()
+        # Den Modus nur speichern, wenn die Anzahl auch uebernommen wurde.
+        # Sonst stuende z.B. "aus" drin, waehrend noch 20 Viewer offen sind.
+        if self._viewer_anzahl_anwenden(ergebnis["viewer_anzahl"]):
+            self.einstellungen.setValue(k.FORTGESCHRITTEN_SCHLUESSEL, ergebnis["fortgeschritten"])
         print("settings loaded succesfully.")
 
     def _root_ordner_anwenden(self):
@@ -353,8 +483,11 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         patienten = set()
         if self._offener_patient_name:
             patienten.add(root / self._offener_patient_name)
-        if self.aktueller_ordner is not None:
-            for vorfahr in Path(self.aktueller_ordner).resolve().parents:
+        # Die Patienten aller Viewer, nicht nur des aktiven
+        for kachel in self.viewer_raster.kacheln:
+            if kachel.ordner is None:
+                continue
+            for vorfahr in Path(kachel.ordner).resolve().parents:
                 if vorfahr.parent == root:
                     patienten.add(vorfahr)
                     break
@@ -884,9 +1017,10 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
                 print("This was the last scan of the examination, its number and date go with it")
 
         #Vor dem Entfernen pruefen: danach laesst sich der Pfad nicht mehr
-        #sauber vergleichen
-        war_geladen = (self.aktueller_ordner is not None
-                       and Path(self.aktueller_ordner).resolve() == scan_ordner.resolve())
+        #sauber vergleichen. Kann in mehreren Viewern gleichzeitig offen sein
+        betroffene = [kachel for kachel in self.viewer_raster.kacheln
+                      if kachel.ordner is not None
+                      and Path(kachel.ordner).resolve() == scan_ordner.resolve()]
 
         try:
             if art == LoeschDialog.ENDGUELTIG:
@@ -904,14 +1038,11 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             print(f"Removing the scan failed: {e}")
             return
 
-        if war_geladen:
-            #Sonst zeigt aktueller_ordner auf einen Ordner, den es nicht mehr
+        for kachel in betroffene:
+            #Sonst zeigt der Viewer auf einen Ordner, den es nicht mehr
             #gibt, und der naechste Klick auf Einzeichnen laeuft ins Leere
-            self.aktueller_ordner = None
-            self.aktuelle_teile = None
-            self.aktuelles_hand_mesh = None
-            self.plotter.clear()
-            print("The removed scan was the loaded one, viewer cleared")
+            kachel.leeren()
+            print(f"The removed scan was loaded in viewer {self.viewer_raster.nummer(kachel)}, viewer cleared")
 
         self.hinweis_label.setText(meldung)
         self._nav_aktualisieren()
@@ -1832,7 +1963,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         return np.array(picker.GetPickPosition())
 
     def eventFilter(self, obj, event):
-        if obj is self.viewer_spalte and event.type() == QEvent.Resize:
+        if obj in (self.viewer_spalte, self.viewer_raster) and event.type() == QEvent.Resize:
             self._positioniere_overlay_buttons()                             
             return super().eventFilter(obj, event)   
     

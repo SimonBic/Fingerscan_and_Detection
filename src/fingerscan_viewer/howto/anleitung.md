@@ -22,7 +22,7 @@ Auf das große, quadratische Plus klicken, Name / Kennnummer eintragen, fertig.
 
 ### Neuen Scan hinzufügen
 
-Auf einen beliebigen Patienten klicken, dann auf das rechteckige Plus. Anschließend genau eine .obj-Datei, genau eine .mtl-Datei sowie die dazugehörigen Bilddateien gleichzeitig auswählen und öffnen. Dann dem Menü folgen.
+Auf einen beliebigen Patienten klicken, dann auf das rechteckige Plus. Anschließend genau eine .obj-Datei, genau eine .mtl-Datei sowie die dazugehörigen Bilddateien gleichzeitig auswählen und öffnen. Dann dem Menü folgen. Die Software liefert zwecks Datenschutz keine Scans mit. 
 
 ### Angaben einer Untersuchung nachtragen
 
@@ -47,6 +47,18 @@ Bedeutung der Piktogramme (erscheinen erst, wenn der jeweilige Scan vorhanden is
 - 3D- oder 2D-Heatmap -> erscheint neben dem Patienten, zeigt den Genesungsverlauf in gewählter Dimension
 
 Ich empfehle das Arbeiten mit einer Maus. Mit einem Trackpad ist die Verwendung freilich auch möglich, aber mit einer Maus wird ein besseres Erlebnis geboten. Im Viewer in der Mitte des Bildschirm kann durch Halten der linken Maustaste der Scan beliebig gedreht werden. Mit dem Mausrad kann gezoomt werden. Durch Halten der mittleren Maustaste (das Mausrad) kann der Scan hin und her geschoben werden. Durch gleichzeitiges Halten der Steuerungstaste (STRG) und der linken Maustaste kann der Scan gedreht werden, mit der Blickrichtung als Achse.
+
+### Mehrere Viewer
+
+Über das Einstellungs-Rädchen oben rechts kann die Anzahl der Viewer eingestellt werden, von 1 bis 9. Der Platz in der Mitte wird dann gleichmäßig auf die Viewer aufgeteilt, die Einstellung bleibt auch nach einem Neustart erhalten. Ab zwei Viewern ist der aktive Viewer blau umrandet. In ihm passiert alles, was über die Knöpfe links gestartet wird, und dort hinein wird auch ein Scan aus der Navigationsspalte geladen.
+
+- Tab kurz drücken: der nächste Viewer wird aktiv.
+- Tab gedrückt halten und in einen Viewer rechtsklicken: genau dieser Viewer wird aktiv. Rechtsklick ohne Tab setzt wie gewohnt Punkte.
+- Einen Scan per Drag-and-Drop direkt auf einen Viewer ziehen: der Scan wird in diesem Viewer geöffnet.
+
+Gewechselt werden kann nur im Hauptmenü. Läuft gerade ein Arbeitsschritt (z. B. Finger isolieren), diesen erst abschließen oder "Zurück zum Hauptmenü" klicken. Dasselbe gilt für das Ändern der Anzahl.
+
+Es können bis zu 99 Viewer gleichzeitig gezeigt werden. Ich wollte eigentlich das Limit zwecks Leistung auf 9 setzen, aber ich entschied mich für 99, um dem User möglichst viel Freiheit zu geben. Bitte beachten sie die Gefahr, dass Sie ihren PC bei zu vielen Scans, die gleichzeitig offen sind, massiv überlasten können. Mit Vorsicht genießen. Mehr als 9 Viewer können nur angezeigt werden, wenn man in den Einstellungen den "Forgeschrittenen Modus" aktiviert. 
 
 ---
 

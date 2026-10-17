@@ -75,6 +75,15 @@ DRUCK_STYLESHEET = """
 EINSTELLUNGEN_FIRMA = "UKR"
 EINSTELLUNGEN_APP = "Fingerscan-Viewer"
 ROOT_ORDNER_SCHLUESSEL = "root_ordner"
+VIEWER_ANZAHL_SCHLUESSEL = "viewer_anzahl"
+FORTGESCHRITTEN_SCHLUESSEL = "fortgeschrittener_modus"
+
+
+# ---------- Mehrere Viewer ----------
+
+VIEWER_ANZAHL_NORMAL_MAX = 9    # ohne Fortgeschrittenen Modus
+VIEWER_ANZAHL_MAX = 99          # nur im Fortgeschrittenen Modus
+VIEWER_RAND = 4             # Platz um das VTK-Fenster, darin sitzt der blaue Rand
 
 
 # ---------- Title Screen ----------
