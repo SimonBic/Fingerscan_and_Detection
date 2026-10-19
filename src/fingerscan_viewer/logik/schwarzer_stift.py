@@ -224,9 +224,17 @@ def _diagnose_schreiben(ordner, nummer, farbbild, dunkel):
         ordner / f"ansicht_{nummer:02d}_maske.png")
 
 
-def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None):
+def _direkt(funktion):
+    #Ohne Hintergrund-Thread laeuft alles schon im Hauptthread, also einfach direkt aufrufen
+    return funktion()
+
+
+def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None, hauptthread=_direkt):
     # Nimmt den Finger im laufenden Viewer von allen Seiten auf und
     # markiert jedes Face, das im gefilterten Bild schwarz ist.
+    #
+    #hauptthread fuehrt eine Funktion im Hauptthread aus. Laeuft die Suche
+    #im Hintergrund, darf nur der Hauptthread den Plotter anfassen.
     mittelpunkt = np.array(fein.center)
 
     normalen = np.asarray(
@@ -236,29 +244,50 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None):
     id_mesh = fein.copy(deep=True)
     id_mesh.cell_data["ID"] = _id_farben(fein.n_cells)
 
-    kamera_vorher = plotter.camera_position
-    hintergrund_vorher = plotter.background_color
-    scan_schauspieler = [a for a in plotter.renderer.actors.values()]
+    #Alles, was den Plotter anfasst, gebuendelt, damit es im Hauptthread laufen kann
+    def vorbereiten():
+        kamera_vorher = plotter.camera_position
+        hintergrund_vorher = plotter.background_color
+        scan_schauspieler = [a for a in plotter.renderer.actors.values()]
 
-    # lighting=False und spaeter kein Kantenglaetten: sonst mischt der
-    # Renderer benachbarte IDs zu einer dritten, gar nicht existierenden
-    # Zahl.
-    id_schauspieler = plotter.add_mesh(id_mesh, scalars="ID", rgb=True,
-                                       lighting=False, show_scalar_bar=False,
-                                       reset_camera=False)
+        # lighting=False und spaeter kein Kantenglaetten: sonst mischt der
+        # Renderer benachbarte IDs zu einer dritten, gar nicht existierenden
+        # Zahl.
+        id_schauspieler = plotter.add_mesh(id_mesh, scalars="ID", rgb=True,
+                                           lighting=False, show_scalar_bar=False,
+                                           reset_camera=False)
+        _eingabe_sperren(plotter, True)
+        #Die vier Werte braucht spaeter die Schleife und das Aufraeumen
+        return kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler
+
+    #Vorbereitung im Hauptthread ausfuehren und die Werte zurueckholen
+    kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler = hauptthread(vorbereiten)
 
     strich = np.zeros(fein.n_cells, dtype=bool)
     gesehen = np.zeros(fein.n_cells, dtype=bool)
 
-    _eingabe_sperren(plotter, True)
+    #Viewer wieder so hinterlassen, wie er war, ebenfalls im Hauptthread
+    def aufraeumen():
+        plotter.remove_actor(id_schauspieler)
+        for schauspieler in scan_schauspieler:
+            schauspieler.SetVisibility(True)
+        plotter.set_background(hintergrund_vorher)
+        plotter.enable_anti_aliasing()
+        plotter.camera_position = kamera_vorher
+        plotter.render()
+        _eingabe_sperren(plotter, False)
+
     try:
         for nummer, richtung in enumerate(_kamera_richtungen()):
-            farbbild = _aufnehmen(plotter, mittelpunkt, richtung,
-                                  scan_schauspieler, id_schauspieler,
-                                  ist_id=False, hintergrund=hintergrund_vorher)
-            id_bild = _aufnehmen(plotter, mittelpunkt, richtung,
-                                 scan_schauspieler, id_schauspieler,
-                                 ist_id=True, hintergrund="black")
+            #Beide Bilder einer Ansicht in einem Rutsch im Hauptthread aufnehmen,
+            #der Rest der Schleife rechnet dann im Hintergrund
+            farbbild, id_bild = hauptthread(lambda: (
+                _aufnehmen(plotter, mittelpunkt, richtung,
+                           scan_schauspieler, id_schauspieler,
+                           ist_id=False, hintergrund=hintergrund_vorher),
+                _aufnehmen(plotter, mittelpunkt, richtung,
+                           scan_schauspieler, id_schauspieler,
+                           ist_id=True, hintergrund="black")))
 
             ids = _farben_zu_ids(id_bild)
             # Nur gueltige Nummern: Farbrundung kann trotz aller
@@ -266,7 +295,10 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None):
             sichtbar = (ids >= 0) & (ids < fein.n_cells)
             gesehen[np.unique(ids[sichtbar])] = True
 
-            dunkel = (gimp_kette(farbbild) < k.STIFT_SCHWELLE_ANSICHT) & sichtbar
+            #Erst mal ist nichts dunkel, auch der ganze Hintergrund nicht
+            dunkel = np.zeros(sichtbar.shape, dtype=bool)
+            #Filterkette nur auf die Finger-Pixel, der Finger ist nur rund 9 % des Bildes, spart 60 % Rechenzeit
+            dunkel[sichtbar] = gimp_kette(farbbild[sichtbar]) < k.STIFT_SCHWELLE_ANSICHT
             massstab = _pixel_je_mm(ids, sichtbar, fein)
             dunkel = _luecken_im_bild_schliessen(
                 dunkel,
@@ -281,15 +313,8 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None):
             if diagnose_ordner is not None:
                 _diagnose_schreiben(diagnose_ordner, nummer, farbbild, dunkel)
     finally:
-        # Viewer wieder so hinterlassen, wie er war
-        plotter.remove_actor(id_schauspieler)
-        for schauspieler in scan_schauspieler:
-            schauspieler.SetVisibility(True)
-        plotter.set_background(hintergrund_vorher)
-        plotter.enable_anti_aliasing()
-        plotter.camera_position = kamera_vorher
-        plotter.render()
-        _eingabe_sperren(plotter, False)
+        #Auch bei einem Fehler den Viewer zuruecksetzen, im Hauptthread
+        hauptthread(aufraeumen)
 
     return strich, {"gesehen": int(gesehen.sum()), "faces": int(fein.n_cells),
                     "strich": int(strich.sum())}
@@ -378,7 +403,7 @@ def _split_finger_teile(fein_ganz, strich):
 
 # ---------- Hauptfunktion ----------
 
-def markiere_strich(plotter, teile, diagnose_ordner=None):
+def markiere_strich(plotter, teile, diagnose_ordner=None, hauptthread=_direkt):
     # Der ganze Ablauf 
     mit_bild = [(mesh, tex) for mesh, tex in teile if mesh.n_points]
     if not mit_bild:
@@ -389,7 +414,8 @@ def markiere_strich(plotter, teile, diagnose_ordner=None):
     # Unterteilen, damit ein Dreieck nur wenige Pixel gross ist 
     fein = ganz.subdivide(k.STIFT_UNTERTEILUNGEN, subfilter="linear")
 
-    strich, bericht = strich_maske_aus_ansichten(plotter, fein, diagnose_ordner)
+    #hauptthread nur durchreichen, gebraucht wird er erst bei den Aufnahmen
+    strich, bericht = strich_maske_aus_ansichten(plotter, fein, diagnose_ordner, hauptthread)
 
     if not strich.any():
         return [], bericht

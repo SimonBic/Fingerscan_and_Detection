@@ -1779,24 +1779,37 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
         self.setze_zeichnungs_status_zurueck()
         print("Looking for the black pen stroke, the viewer takes pictures from all sides and is locked while it does")
-        self.hinweis_label.setText("Markierung wird gesucht ...")
-        QApplication.processEvents()
 
-        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
-        try:
-            flaechen, bericht = markiere_strich(
-                self.plotter, self.aktuelle_teile,
-                diagnose_ordner=k.ANSICHT_DIAGNOSE_ORDNER)
-        finally:
-            QApplication.restoreOverrideCursor()
+        #Suche im Hintergrund wie beim Finger isolieren, damit sich die Ladeanzeige dreht.
+        #Die Aufnahmen schickt markiere_strich ueber self._hauptthread in den Hauptthread.
+        self._im_hintergrund(
+            lambda: markiere_strich(self.plotter, self.aktuelle_teile,
+                                    diagnose_ordner=k.ANSICHT_DIAGNOSE_ORDNER,
+                                    hauptthread=self._hauptthread),
+            self._stift_fertig, k.STIFT_SUCHEN_HINWEIS)
+
+    def _stift_fertig(self, ergebnis, fehler):
+        #Kommt im Hauptthread, wenn die Suche durch ist, genau eins von beiden ist None
+        if fehler is not None:
+            #Fehler anzeigen statt ihn still verschwinden zu lassen
+            self.hinweis_label.setText(f"Markierungssuche fehlgeschlagen: {fehler}")
+            print(f"Pen detection failed: {fehler!r}")
+            return
+        #Ergebnis von markiere_strich auspacken
+        flaechen, bericht = ergebnis
 
         print(f"{bericht.get('gesehen', 0)} of {bericht.get('faces', 0)} faces were visible in the views, "
               f"{bericht.get('strich', 0)} of them look like the pen stroke")
         if not flaechen:
-            self.hinweis_label.setText(
-                "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
-                f"{k.ANSICHT_DIAGNOSE_ORDNER}.")
-            print(f"No stroke found, the recorded views are in {k.ANSICHT_DIAGNOSE_ORDNER} for checking")
+            #Den Ordner nur nennen, wenn ueberhaupt Diagnosebilder geschrieben werden
+            if k.ANSICHT_DIAGNOSE_ORDNER is not None:
+                self.hinweis_label.setText(
+                    "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
+                    f"{k.ANSICHT_DIAGNOSE_ORDNER}.")
+                print(f"No stroke found, the recorded views are in {k.ANSICHT_DIAGNOSE_ORDNER} for checking")
+            else:
+                self.hinweis_label.setText("Kein Strich gefunden.")
+                print("No stroke found")
             return
 
         self.zeichnungs_status["flaeche"] = flaechen

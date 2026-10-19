@@ -425,6 +425,8 @@ STIFT_KONTRAST = 0.48
 # Beschriftung des Knopfes: benennt die Bildbedingungen, nicht Menschen.
 # Fuer andere Hautfarben ist ein eigenes Verfahren vorgesehen.
 STIFT_KNOPF_TEXT = "Schwarzer Stift,\nhelle Haut"
+#Hinweis waehrend die Ladeanzeige bei der Stiftsuche laeuft
+STIFT_SUCHEN_HINWEIS = "Markierung wird gesucht ..."
 STIFT_KNOPF_HILFE = ("Erkennt eine schwarze Stiftmarkierung auf heller Haut und füllt "
                      "den eingekreisten Bereich. Nur am isolierten Finger. AKTUELL NOCH UNFINISEHED.")
 
