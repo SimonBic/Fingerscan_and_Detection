@@ -114,7 +114,7 @@ def _eingabe_sperren(plotter, gesperrt: bool):
         fenster.setEnabled(not gesperrt)
 
 
-def _pixel_je_mm(id_bild, sichtbar, fein) -> float:
+def _pixel_je_mm(id_bild, sichtbar, fein, richtung) -> float:
     # Massstab der Ansicht, aus dem ID-Puffer abgelesen: wie viele Pixel
     # entspricht ein Millimeter? Muss je Ansicht neu bestimmt werden, weil
     # das Viewer-Fenster jede Groesse haben kann.
@@ -126,6 +126,8 @@ def _pixel_je_mm(id_bild, sichtbar, fein) -> float:
     ids = np.unique(id_bild[sichtbar])
     ecken = fein.faces.reshape(-1, 4)[:, 1:][ids]
     punkte = fein.points[np.unique(ecken)]
+    #Tiefe in Blickrichtung abziehen, im Bild ist ja auch nur die flache Projektion zu sehen
+    punkte = punkte - np.outer(punkte @ richtung, richtung)
     quer_mm = float(np.linalg.norm(np.ptp(punkte, axis=0)))
     return quer_px / quer_mm if quer_mm > 0 else 0.0
 
@@ -208,7 +210,8 @@ def _aufnehmen( plotter,
     if ist_id:
         plotter.disable_anti_aliasing()
     else:
-        plotter.enable_anti_aliasing()
+        #msaa wie im Viewer, ohne Argument waere es ssaa und das Bild saehe anders aus als beim Einmessen
+        plotter.enable_anti_aliasing("msaa")
 
     _kamera_setzen(plotter, mittelpunkt, richtung)
     return plotter.screenshot(return_img=True)
@@ -248,7 +251,14 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None, hauptthread=
     def vorbereiten():
         kamera_vorher = plotter.camera_position
         hintergrund_vorher = plotter.background_color
-        scan_schauspieler = [a for a in plotter.renderer.actors.values()]
+        #Nur die Fingermeshes, erkannt am Namen aus rendere_teile. Sonst kaemen Text und alte Markierungen mit ins Bild.
+        scan_schauspieler = [a for name, a in plotter.renderer.actors.items()
+                             if str(name).startswith(k.SCAN_TEIL_NAME)]
+        #Nichts mit dem Namen gefunden, dann wie frueher alle nehmen statt ein leeres Bild aufzunehmen
+        scan_schauspieler = scan_schauspieler or list(plotter.renderer.actors.values())
+        #Alles andere samt bisheriger Sichtbarkeit merken, damit es nachher wieder so aussieht
+        andere = [(a, a.GetVisibility()) for a in plotter.renderer.actors.values()
+                  if not any(a is s for s in scan_schauspieler)]
 
         # lighting=False und spaeter kein Kantenglaetten: sonst mischt der
         # Renderer benachbarte IDs zu einer dritten, gar nicht existierenden
@@ -256,12 +266,15 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None, hauptthread=
         id_schauspieler = plotter.add_mesh(id_mesh, scalars="ID", rgb=True,
                                            lighting=False, show_scalar_bar=False,
                                            reset_camera=False)
+        #Andere erst nach add_mesh ausblenden, damit sie weder im Bild landen noch die Kamera beim reset_camera verschieben
+        for a, _ in andere:
+            a.SetVisibility(False)
         _eingabe_sperren(plotter, True)
-        #Die vier Werte braucht spaeter die Schleife und das Aufraeumen
-        return kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler
+        #Die Werte braucht spaeter die Schleife und das Aufraeumen
+        return kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler, andere
 
     #Vorbereitung im Hauptthread ausfuehren und die Werte zurueckholen
-    kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler = hauptthread(vorbereiten)
+    kamera_vorher, hintergrund_vorher, scan_schauspieler, id_schauspieler, andere = hauptthread(vorbereiten)
 
     strich = np.zeros(fein.n_cells, dtype=bool)
     gesehen = np.zeros(fein.n_cells, dtype=bool)
@@ -271,8 +284,12 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None, hauptthread=
         plotter.remove_actor(id_schauspieler)
         for schauspieler in scan_schauspieler:
             schauspieler.SetVisibility(True)
+        #Text, Kugeln usw. wieder so sichtbar wie vorher
+        for a, war_sichtbar in andere:
+            a.SetVisibility(war_sichtbar)
         plotter.set_background(hintergrund_vorher)
-        plotter.enable_anti_aliasing()
+        #Wieder msaa wie beim Start, nicht dauerhaft das langsamere ssaa
+        plotter.enable_anti_aliasing("msaa")
         plotter.camera_position = kamera_vorher
         plotter.render()
         _eingabe_sperren(plotter, False)
@@ -299,12 +316,13 @@ def strich_maske_aus_ansichten(plotter, fein, diagnose_ordner=None, hauptthread=
             dunkel = np.zeros(sichtbar.shape, dtype=bool)
             #Filterkette nur auf die Finger-Pixel, der Finger ist nur rund 9 % des Bildes, spart 60 % Rechenzeit
             dunkel[sichtbar] = gimp_kette(farbbild[sichtbar]) < k.STIFT_SCHWELLE_ANSICHT
-            massstab = _pixel_je_mm(ids, sichtbar, fein)
+            massstab = _pixel_je_mm(ids, sichtbar, fein, richtung)
             dunkel = _luecken_im_bild_schliessen(
                 dunkel,
                 int(round(massstab * k.MAX_LUECKE_MM)),
                 max(int(round(massstab * k.STRICH_DICKE_MM)), 1))
-            getroffen = np.unique(ids[dunkel])
+            #Nur Pixel auf dem Finger, Bruecken ragen am Rand in den Hintergrund und dort waere die ID -1
+            getroffen = np.unique(ids[dunkel & sichtbar])
 
             if len(getroffen):
                 frontal = np.abs(normalen[getroffen] @ richtung) > k.MIN_BLICKWINKEL_COS
@@ -369,14 +387,28 @@ def _split_finger_teile(fein_ganz, strich):
             max_edge_faces = anzahl_edge_faces
             aussenteil = nummer
 
+    #Kein Hautgebiet gross genug fuer das Aussenteil, sonst wuerde unten der ganze Finger zur Flaeche
+    if aussenteil is None:
+        return []
+
     #FaceNr der Aussenteil-Faces, also ihre Nummer im ganzen Mesh statt im Teilmesh
     face_nr = np.asarray(finger_ohne_striche.cell_data["FaceNr"])
     #Maske ueber das ganze Mesh, erst mal ist kein Face aussen
     ist_aussen = np.zeros(fein_ganz.n_cells, dtype=bool)
     #Faces des Aussenteils ueber ihre FaceNr im ganzen Mesh markieren
     ist_aussen[face_nr[kennung_finger == aussenteil]] = True
+    #FaceNr des groessten zusammenhaengenden Stuecks, also des eigentlichen Fingers
+    haupt_nr = np.asarray(fein_ganz.connectivity("largest").cell_data["FaceNr"])
+    #Maske, welche Faces zum Finger selbst gehoeren
+    im_hauptteil = np.zeros(fein_ganz.n_cells, dtype=bool)
+    im_hauptteil[haupt_nr] = True
+    #Lose Inseln vom Schneiden zaehlen als aussen, sonst wird jede zu einem eigenen Bereich
+    ist_aussen |= ~im_hauptteil
 
     #Alles ausser dem Aussenteil, also Strich, Innenflaeche, Taschen und Kruemel, in zusammenhaengende Gebiete zerlegen
+    #Lag der Strich nur auf losen Inseln, bleibt nichts uebrig, und max() unten wuerde abstuerzen
+    if ist_aussen.all():
+        return []
     rest = fein_ganz.extract_cells(~ist_aussen).connectivity("all")
     #Gebietsnummer je Face im Rest
     kennung_rest = np.asarray(rest.cell_data["RegionId"])

@@ -1801,8 +1801,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         print(f"{bericht.get('gesehen', 0)} of {bericht.get('faces', 0)} faces were visible in the views, "
               f"{bericht.get('strich', 0)} of them look like the pen stroke")
         if not flaechen:
+            #Strich ist da, umschliesst aber keinen Bereich, das ist etwas anderes als gar kein Strich
+            if bericht.get("strich", 0) > 0:
+                self.hinweis_label.setText(
+                    "Strich gefunden, er umschliesst aber keinen Bereich. Ist die Markierung geschlossen?")
+                print("Pen stroke found, but it does not enclose an area")
             #Den Ordner nur nennen, wenn ueberhaupt Diagnosebilder geschrieben werden
-            if k.ANSICHT_DIAGNOSE_ORDNER is not None:
+            elif k.ANSICHT_DIAGNOSE_ORDNER is not None:
                 self.hinweis_label.setText(
                     "Kein Strich gefunden. Die Ansichten liegen zum Nachsehen in "
                     f"{k.ANSICHT_DIAGNOSE_ORDNER}.")

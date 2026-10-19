@@ -215,12 +215,14 @@ def rendere_teile(plotter, teile: list) -> None:
     # Screenshots der Markierungserkennung muessen exakt gleich aussehen,
     # sonst gilt der dort eingemessene Schwellwert nicht mehr.
     for pv_mesh, tex in teile:
+        #Eindeutiger Name je Mesh, daran erkennt die Stifterkennung die Fingermeshes
+        name = f"{k.SCAN_TEIL_NAME}_{pv_mesh.memory_address}"
         if tex is not None:
-            plotter.add_mesh(pv_mesh, texture=tex, smooth_shading=False)
+            plotter.add_mesh(pv_mesh, texture=tex, smooth_shading=False, name=name)
         elif "RGB" in pv_mesh.point_data:
-            plotter.add_mesh(pv_mesh, scalars="RGB", rgb=True, smooth_shading=True)
+            plotter.add_mesh(pv_mesh, scalars="RGB", rgb=True, smooth_shading=True, name=name)
         else:
-            plotter.add_mesh(pv_mesh)
+            plotter.add_mesh(pv_mesh, name=name)
 
 
 def zeige_mit_texturen(plotter: p_v.Plotter, teile: list) -> None:

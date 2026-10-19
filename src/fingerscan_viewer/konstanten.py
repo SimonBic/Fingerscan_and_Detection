@@ -437,6 +437,10 @@ STIFT_KNOPF_HILFE = ("Erkennt eine schwarze Stiftmarkierung auf heller Haut und 
 # noch schnell (gemessen 0,1 s fuer einen Finger).
 STIFT_UNTERTEILUNGEN = 2
 
+#Namensanfang der Fingermeshes im Viewer, damit die Stifterkennung sie von
+#Text, Kugeln und alten Markierungen unterscheiden kann
+SCAN_TEIL_NAME = "scan_teil"
+
 # Wie nah ein Punkt am urspruenglichen Fingerrand liegen muss, um als
 # "am Rand" zu gelten
 RAND_ABSTAND_TOLERANZ = 0.01       # mm
