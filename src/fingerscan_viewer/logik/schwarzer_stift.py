@@ -302,26 +302,31 @@ def _flaeche_aus_faces(fein, strich):
 
 def _split_finger_teile(fein_ganz, strich):
     #Trennt den Finger an den Strichen. Das aeussere Teil hat die meisten
-    #Randfaces, jedes eingekreiste Teil gehoert zu dem Strich, mit dem es
-    #die meisten Grenzvertices teilt. So sind auch mehrere eingezeichnete
-    #Bereiche moeglich.
+    #Randfaces, alles andere liegt innerhalb einer Markierung und wird in
+    #zusammenhaengende Gebiete zerlegt. Jedes Gebiet ist ein eingezeichneter
+    #Bereich mit Strich, Taschen im Strich werden so mit aufgefuellt.
     #
-    #clean() ist Pflicht: das OBJ hat an jeder UV-Naht doppelte Punkte,
+    #clean() ist Wichtig, weil das OBJ hat an jeder UV-Naht doppelte Punkte,
     #ohne das Zusammenlegen findet connectivity 262 Gebiete statt einem.
     fein_ganz = fein_ganz.clean()
+    #Jedes Face kriegt ne Nummer, einzigartig im kompletten MEsh
+    fein_ganz.cell_data["FaceNr"] = np.arange(fein_ganz.n_cells)
 
+    #Nimmt alle aus dem MEsh, was nicht der Strich ist.
+    #connectivity all gibt zusammenhaengende Gebiete, die nicht durch den Strich getrennt sind die gleiche nummer (Also wenn es eine Kantenverbindung dazwischen gibt)
     finger_ohne_striche = fein_ganz.extract_cells(~strich).connectivity("all")
-    striche_ohne_finger = fein_ganz.extract_cells(strich).connectivity("all")
 
+    #Macht aus den Gebitsnummern ein Array
     kennung_finger = np.asarray(finger_ohne_striche.cell_data["RegionId"])
+    #Berechnet die Groesse jedes Gebiets und zählt die Anzahl der FAces pro Gebiet.
     groessen_finger = np.bincount(kennung_finger)
+
     if len(groessen_finger) < 2:
         return []
 
-    kennung_striche = np.asarray(striche_ohne_finger.cell_data["RegionId"])
-
     #Winzige Gebiete gar nicht erst betrachten, das sind Taschen zwischen
     #zwei dicht beieinander liegenden Strichteilen
+    #Schreibt jeden möglichen Kandidaten mit > 200 Faces in ein Dictionary, mit der Nummer als Key und dem Teilmesh als Value
     kandidaten = {}
     for nummer in np.flatnonzero(groessen_finger >= k.MIN_FLAECHE_FACES):
         kandidaten[int(nummer)] = finger_ohne_striche.extract_cells(
@@ -339,28 +344,31 @@ def _split_finger_teile(fein_ganz, strich):
             max_edge_faces = anzahl_edge_faces
             aussenteil = nummer
 
+    #FaceNr der Aussenteil-Faces, also ihre Nummer im ganzen Mesh statt im Teilmesh
+    face_nr = np.asarray(finger_ohne_striche.cell_data["FaceNr"])
+    #Maske ueber das ganze Mesh, erst mal ist kein Face aussen
+    ist_aussen = np.zeros(fein_ganz.n_cells, dtype=bool)
+    #Faces des Aussenteils ueber ihre FaceNr im ganzen Mesh markieren
+    ist_aussen[face_nr[kennung_finger == aussenteil]] = True
+
+    #Alles ausser dem Aussenteil, also Strich, Innenflaeche, Taschen und Kruemel, in zusammenhaengende Gebiete zerlegen
+    rest = fein_ganz.extract_cells(~ist_aussen).connectivity("all")
+    #Gebietsnummer je Face im Rest
+    kennung_rest = np.asarray(rest.cell_data["RegionId"])
+    #Nummer im ganzen Mesh je Face im Rest, damit die Strichmaske passt
+    rest_nr = np.asarray(rest.cell_data["FaceNr"])
+
     eingekreiste_teile = []
-    for nummer_strich in range(int(kennung_striche.max()) + 1):
-        strich_teil = striche_ohne_finger.extract_cells(
-            kennung_striche == nummer_strich).extract_surface(algorithm="dataset_surface")
-        if strich_teil.n_points == 0:
+    #Jedes Gebiet ist eine moegliche Markierung
+    for nummer in range(int(kennung_rest.max()) + 1):
+        #Welche Faces im Rest gehoeren zu diesem Gebiet
+        im_gebiet = kennung_rest == nummer
+        #Zu wenig Haut im Gebiet heisst loser Strichkruemel aussen auf dem Finger, keine Markierung
+        if (~strich[rest_nr[im_gebiet]]).sum() < k.MIN_FLAECHE_FACES:
             continue
-        baum = cKDTree(strich_teil.points)
-
-        max_grenzvertices = 0
-        innen_teil = None
-        for nummer, teil in kandidaten.items():
-            if nummer == aussenteil:
-                continue
-            #Gemeinsame Punkte zaehlen. Die Teile stammen aus demselben
-            #Mesh, deckungsgleiche Punkte liegen also exakt aufeinander.
-            grenzvertices = int((baum.query(teil.points, k=1)[0] < 1e-5).sum())
-            if grenzvertices > max_grenzvertices:
-                max_grenzvertices = grenzvertices
-                innen_teil = teil
-
-        if innen_teil is not None:
-            eingekreiste_teile.append(innen_teil.merge(strich_teil))
+        #Gebiet als eigene Flaeche herausloesen, mit Strich und ohne Luecken
+        eingekreiste_teile.append(
+            rest.extract_cells(im_gebiet).extract_surface(algorithm="dataset_surface"))
 
     #Nach Groesse sortiert, damit die Nummerierung in der Excel-Liste und
     #in der Anzeige immer dieselbe Reihenfolge hat

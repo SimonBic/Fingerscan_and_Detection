@@ -447,7 +447,7 @@ RAND_ABSTAND_TOLERANZ = 0.01       # mm
 # (Median 232 nach der Kette) und Strich (Median 135) weit auseinander,
 # und es wird KEINE Haut faelschlich markiert - 0,0 % bei Schwellen von
 # 110 bis 140. Auf der rohen Textur liefen dagegen Schatten mit hinein.
-ANSICHTEN_RUNDUM = 10              # Kameras rings um die Fingerachse
+ANSICHTEN_RUNDUM = 10           # Kameras rings um die Fingerachse
 ANSICHTEN_SCHRAEG = 5              # je Ring von schraeg oben und unten
 ANSICHT_SCHRAEG_GRAD = 35.0        # wie weit die schraegen Ringe gekippt sind
 
@@ -464,8 +464,8 @@ MIN_BLICKWINKEL_COS = 0.35         # entspricht rund 70 Grad zur Normalen
 
 # Diagnosebilder der Ansichten. Liegt ausserhalb des Repositorys -
 # Patientendaten gehoeren dort niemals hin.
-ANSICHT_DIAGNOSE_ORDNER = (Path.home() / "Arbeit" / "UKR" /
-                           "Diagnose_Ausgaben_Fingerscan_Viewer" / "Ausgabe_GIMP_Kette")
+ANSICHT_DIAGNOSE_ORDNER = None
+# zum debuggen für mich: (Path.home() / "Arbeit" / "UKR" / "Diagnose_Ausgaben_Fingerscan_Viewer" / "Ausgabe_GIMP_Kette")
 
 # Unterbrechungen im Strich: blasse Stellen oder kleine Loecher im Mesh
 # zerlegen die Linie. An einem echten Finger gemessen waren es drei
@@ -473,7 +473,7 @@ ANSICHT_DIAGNOSE_ORDNER = (Path.home() / "Arbeit" / "UKR" /
 # 3,5 mm deckt die beobachteten Luecken ab (1,15 / 1,57 / 1,90 mm) und
 # laesst den Schatten in der Zwischenfingerfalte draussen, der 8,65 mm
 # entfernt liegt und NICHT zur Markierung gehoert.
-MAX_LUECKE_MM = 3.5
+MAX_LUECKE_MM = 1.0
 
 # Grosszuegig: gebrueckt wird immer vom Hauptstrich aus, und die
 # Laengengrenze verhindert Ausreisser. An einem echten Finger waren 27
@@ -490,7 +490,9 @@ STRICH_DICKE_MM = 0.8
 MIN_STUECK_PIXEL = 30
 
 # Kleinere Gebiete sind keine eingezeichnete Flaeche, sondern Taschen
-# zwischen zwei dicht beieinander liegenden Strichteilen
+# zwischen zwei dicht beieinander liegenden Strichteilen. Ausserdem muss
+# eine Markierung mindestens so viele Haut-Faces enthalten, sonst ist sie
+# nur ein loser Strichkruemel
 MIN_FLAECHE_FACES = 200
 
 # Vorschau mehrerer eingekreister Bereiche: jeder bekommt eine eigene
