@@ -483,14 +483,26 @@ def finger_normale(mesh: p_v.PolyData,
     return normale, nahe_punkte, nahe_punkte.mean(axis = 0)
 
 
-def erstelle_schnitt_ellipsoid(
-        lokales_zentrum: np.ndarray, 
+def ellipsoid_geometrie(
+        lokales_zentrum: np.ndarray,
         normale: np.ndarray,
-        verwendete_punkte: np.ndarray, 
+        verwendete_punkte: np.ndarray,
         tiefster_punkt: np.ndarray,
         radius_faktor = 2.0,
         laengen_faktor = 0.8,
-        unterschreitung: float = 0.6) -> p_v.PolyData:
+        unterschreitung: float = 0.6,
+        dicken_faktor: float | None = None,
+        versatz_breite: float = 0.0,
+        versatz_dicke: float = 0.0) -> dict:
+    # Lage, Achsen und Halbachsen des Schnittellipsoids, ohne das Mesh. Die
+    # Oberflaeche braucht das fuer die Ziehpfeile und um gezogene mm wieder
+    # in Faktoren umzurechnen.
+    # dicken_faktor None: quer zur Fingerachse rund, so wie frueher nur mit
+    # radius_faktor. Der Versatz schiebt die Mitte seitlich von der
+    # Fingerachse weg, in Vielfachen von radius_original, damit er auch beim
+    # naechsten Scan desselben Patienten ungefaehr passt.
+    if dicken_faktor is None:
+        dicken_faktor = radius_faktor
 
     if abs(normale[2]) < 1e-8:
         raise ValueError(
@@ -512,23 +524,71 @@ def erstelle_schnitt_ellipsoid(
         )
  
     original_laenge = t_oben - t_boden
-    aequator_radius = radius_faktor * radius_original
     halbe_hauptachse = laengen_faktor * original_laenge
     unten_spitze_t = t_boden - unterschreitung * original_laenge
     zentrum_t = unten_spitze_t + halbe_hauptachse
-    ellipsoid_mitte = lokales_zentrum + normale * zentrum_t
- 
+
+    # Querachsen: Breite zeigt Richtung Nachbarfinger. Nach richte_hand_aus
+    # liegt der auf +x, also x senkrecht zur Fingerachse projizieren. Dicke
+    # steht senkrecht auf beiden (Handruecken/Handflaeche).
+    # Die Basis MUSS rechtshaendig sein: gespiegelt zeigen die Flaechennormalen
+    # nach innen, und compute_implicit_distance in waehle_ganze_dreiecke
+    # vertauscht dann innen und aussen.
+    achse_laenge = normale / np.linalg.norm(normale)
+    achse_breite = np.array([1.0, 0, 0]) - achse_laenge[0] * achse_laenge
+    if np.linalg.norm(achse_breite) < 1e-8:
+        #Fingerachse laeuft genau entlang x, dann ist die Richtung egal
+        achse_breite = np.array([0, 1.0, 0]) - achse_laenge[1] * achse_laenge
+    achse_breite /= np.linalg.norm(achse_breite)
+    achse_dicke = np.cross(achse_laenge, achse_breite)
+
+    ellipsoid_mitte = (lokales_zentrum + normale * zentrum_t
+                       + (versatz_breite * achse_breite + versatz_dicke * achse_dicke) * radius_original)
+
+    return {
+        "mitte": ellipsoid_mitte,
+        "achsen": {"laenge": achse_laenge, "breite": achse_breite, "dicke": achse_dicke},
+        "halbachsen": {
+            "laenge": halbe_hauptachse,
+            "breite": radius_faktor * radius_original,
+            "dicke": dicken_faktor * radius_original,
+        },
+        "radius_original": radius_original,
+        "original_laenge": original_laenge,
+    }
+
+
+def ellipsoid_mesh(geometrie: dict) -> p_v.PolyData:
     # Ellipsoid entlang X bauen (Standard-Ausrichtung von
-    # ParametricEllipsoid), dann auf 'normale' drehen + verschieben
+    # ParametricEllipsoid), dann auf die Achsen drehen + verschieben
+    halbachsen = geometrie["halbachsen"]
+    achsen = geometrie["achsen"]
     basis_ellipsoid = p_v.ParametricEllipsoid(
-        xradius=halbe_hauptachse, yradius=aequator_radius, zradius=aequator_radius
+        xradius=halbachsen["laenge"], yradius=halbachsen["breite"], zradius=halbachsen["dicke"]
     )
-    R = rotationsmatrix_a_nach_b(np.array([1.0, 0, 0]), normale)
     transform = np.eye(4)
-    transform[:3, :3] = R
-    transform[:3, 3] = ellipsoid_mitte
- 
+    transform[:3, :3] = np.column_stack([achsen["laenge"], achsen["breite"], achsen["dicke"]])
+    transform[:3, 3] = geometrie["mitte"]
+
     return basis_ellipsoid.transform(transform, inplace = False)
+
+
+def erstelle_schnitt_ellipsoid(
+        lokales_zentrum: np.ndarray,
+        normale: np.ndarray,
+        verwendete_punkte: np.ndarray,
+        tiefster_punkt: np.ndarray,
+        radius_faktor = 2.0,
+        laengen_faktor = 0.8,
+        unterschreitung: float = 0.6,
+        dicken_faktor: float | None = None,
+        versatz_breite: float = 0.0,
+        versatz_dicke: float = 0.0) -> p_v.PolyData:
+
+    return ellipsoid_mesh(ellipsoid_geometrie(
+        lokales_zentrum, normale, verwendete_punkte, tiefster_punkt,
+        radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung,
+        dicken_faktor=dicken_faktor, versatz_breite=versatz_breite, versatz_dicke=versatz_dicke))
 
 
 def berechne_finale_ausrichtung(normale: np.ndarray, achsen_punkt: np.ndarray, kerben_punkt: np.ndarray) -> np.ndarray:
@@ -641,6 +701,12 @@ def lade_isolate_finger_parameter(scan_ordner: Path) -> dict | None:
         werte.pop("anzahl_punkte_pca", None)
         werte["pca_radius"] = k.PCA_RADIUS
 
+    #Aeltere Dateien kennen nur einen runden Querschnitt. Dicke = Breite
+    #schneidet genau wie damals, sonst wuerde die Automatik bei diesen
+    #Patienten ploetzlich mit der Standard-Dicke schneiden.
+    if "dicken_faktor" not in werte and "radius_faktor" in werte:
+        werte["dicken_faktor"] = werte["radius_faktor"]
+
     return werte
 
 def speichere_isolate_finger_parameter(
@@ -648,15 +714,23 @@ def speichere_isolate_finger_parameter(
             radius_faktor: float,
             laengen_faktor: float,
             unterschreitung: float,
-            pca_radius: float = k.PCA_RADIUS) -> Path:
+            pca_radius: float = k.PCA_RADIUS,
+            dicken_faktor: float | None = None,
+            versatz_breite: float = 0.0,
+            versatz_dicke: float = 0.0) -> Path:
 
+    if dicken_faktor is None:
+        dicken_faktor = radius_faktor
     pfad = isolate_finger_parameter_datei_pfad(scan_ordner)
     pfad.parent.mkdir(parents=True, exist_ok=True)
     pfad.write_text(
         f"radius_faktor={radius_faktor}\n"
+        f"dicken_faktor={dicken_faktor}\n"
         f"laengen_faktor={laengen_faktor}\n"
         f"unterschreitung={unterschreitung}\n"
         f"pca_radius={pca_radius}\n"
+        f"versatz_breite={versatz_breite}\n"
+        f"versatz_dicke={versatz_dicke}\n"
     )
     return pfad
 
@@ -668,6 +742,9 @@ def isolate_finger(path: str,
                 laengen_faktor = k.ISOLIEREN_STANDARD_WERTE["laengen_faktor"],
                 unterschreitung = k.ISOLIEREN_STANDARD_WERTE["unterschreitung"],
                 pca_radius = k.ISOLIEREN_STANDARD_WERTE["pca_radius"],
+                dicken_faktor = k.ISOLIEREN_STANDARD_WERTE["dicken_faktor"],
+                versatz_breite = k.ISOLIEREN_STANDARD_WERTE["versatz_breite"],
+                versatz_dicke = k.ISOLIEREN_STANDARD_WERTE["versatz_dicke"],
                 zeige_zwischenschritte = True,
                 bei_punkt_gesetzt = None,
                 bei_punkt_abgelehnt = None,
@@ -798,6 +875,9 @@ def isolate_finger(path: str,
             radius_faktor = empfangene_werte.get("radius_faktor", radius_faktor)
             laengen_faktor = empfangene_werte.get("laengen_faktor", laengen_faktor)
             unterschreitung = empfangene_werte.get("unterschreitung", unterschreitung)
+            dicken_faktor = empfangene_werte.get("dicken_faktor", dicken_faktor)
+            versatz_breite = empfangene_werte.get("versatz_breite", versatz_breite)
+            versatz_dicke = empfangene_werte.get("versatz_dicke", versatz_dicke)
 
             neuer_pca_radius = empfangene_werte.get("pca_radius", pca_radius)
             if neuer_pca_radius != pca_radius:
@@ -809,7 +889,8 @@ def isolate_finger(path: str,
     elif zeige_zwischenschritte:
         ellipsoid_vorschau = erstelle_schnitt_ellipsoid(
             avg_point_of_hurt_finger, normale, verwendete_vertices, tiefster_punkt,
-            radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung
+            radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung,
+            dicken_faktor=dicken_faktor, versatz_breite=versatz_breite, versatz_dicke=versatz_dicke
         )
         ellipsoid_plotter = p_v.Plotter()
         zeige_mit_texturen(ellipsoid_plotter, texture_teile)
@@ -824,7 +905,10 @@ def isolate_finger(path: str,
         tiefster_punkt,
         radius_faktor = radius_faktor,
         laengen_faktor = laengen_faktor,
-        unterschreitung = unterschreitung)
+        unterschreitung = unterschreitung,
+        dicken_faktor = dicken_faktor,
+        versatz_breite = versatz_breite,
+        versatz_dicke = versatz_dicke)
 
     #Cutten
     texture_teile_isoliert = clippe_teile(texture_teile, ellipsoid)

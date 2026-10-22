@@ -56,6 +56,8 @@ class UI_Aufbau_Mixin:
         ellipsoid_layout = QVBoxLayout(self.ellipsoid_einstellen_container)
         self.label_radius = QLabel("Breite: 2.00")
         self.slider_radius = self._ellipsoid_slider(100, 400, 200, ellipsoid_layout, self.label_radius)
+        self.label_dicke = QLabel("Dicke: 2.00")
+        self.slider_dicke = self._ellipsoid_slider(100, 400, 200, ellipsoid_layout, self.label_dicke)
         self.label_laenge = QLabel("Länge: 0.80")
         self.slider_laenge = self._ellipsoid_slider(30, 150, 80, ellipsoid_layout, self.label_laenge)
         self.label_unterschreitung = QLabel("Unterschreitung: 0.45")
@@ -69,6 +71,10 @@ class UI_Aufbau_Mixin:
             "Fingerachse gesammelt werden. Zu klein: die Achse wird instabil, weil "
             "nur die runde Kuppe erfasst ist. Zu groß: der Knöchel zieht die Achse schief."
         )
+        # Mit der Feststelltaste seitlich verschoben gibt es keinen Regler, der
+        # das zuruecknimmt, also ein eigener Knopf
+        self.button_versatz_zuruecksetzen = self._knopf(
+            "Verschiebung\nzurücksetzen", self.ellipsoid_versatz_zuruecksetzen_klick, ellipsoid_layout)
         self.button_ellipsoid_bestaetigen = self._knopf("Bestätigen", self.ellipsoid_bestaetigen_klick, ellipsoid_layout)
         self.knopf_layout.addWidget(self.ellipsoid_einstellen_container)
         self.ellipsoid_einstellen_container.setVisible(False)

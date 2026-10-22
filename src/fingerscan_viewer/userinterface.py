@@ -59,7 +59,8 @@ from logik.isolate_finger import (
     rendere_teile,
     load_teilmeshe_mit_textur,
     isolate_finger,
-    erstelle_schnitt_ellipsoid,
+    ellipsoid_geometrie,
+    ellipsoid_mesh,
     finger_normale,
     lade_isolate_finger_parameter,
     speichere_isolate_finger_parameter)
@@ -96,6 +97,7 @@ from ui_unterklassen.terminal.terminal_fenster import TerminalFenster
 from ui_unterklassen.hauptmenue.root_ordner_dialog import root_ordner_waehlen
 from ui_unterklassen.hauptmenue.hintergrund_arbeit import Arbeiter, HauptthreadAufruf, PlotterVertreter
 from ui_unterklassen.hauptmenue.ladeanzeige import Ladeanzeige
+from ui_unterklassen.hauptmenue.ellipsoid_griffe import EllipsoidGriffe
 import konstanten as k
 
 
@@ -132,6 +134,12 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.vermessungen = []
         self.ellipsoid_kontext = None
         self.aktueller_ellipsoid_actor = None
+        # Ziehpfeile im Viewer und der seitliche Versatz, fuer den es keinen
+        # Regler gibt (breite, dicke)
+        self.ellipsoid_griffe = None
+        self.ellipsoid_versatz = (0.0, 0.0)
+        self._ellipsoid_geometrie = None
+        self._ellipsoid_ziehen_start = None
         self.isolieren_phase = None
         self.genesungsverlauf_warteschlange = []
         self.genesungsverlauf_index = 0
@@ -1254,6 +1262,7 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         self.automatisch_modus_aktiv = False
         self.isolieren_phase = None
         self.aktueller_ellipsoid_actor = None
+        self._ellipsoid_griffe_entfernen()
         self.button_weiter.setText("Weiter")
         self.button_weiter.setVisible(False)
         self._markieren_beenden()
@@ -1462,12 +1471,26 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
         # schon jetzt die Vorschau rechnen wollen, die es noch gar nicht gibt.
         werte = {**k.ISOLIEREN_STANDARD_WERTE, **werte}
         for regler, wert in ((self.slider_radius, werte["radius_faktor"] * 100),
+                             (self.slider_dicke, werte["dicken_faktor"] * 100),
                              (self.slider_laenge, werte["laengen_faktor"] * 100),
                              (self.slider_unterschreitung, werte["unterschreitung"] * 100),
                              (self.slider_pca_radius, werte["pca_radius"])):
             regler.blockSignals(True)
             regler.setValue(int(round(wert)))
             regler.blockSignals(False)
+        self.ellipsoid_versatz = (werte["versatz_breite"], werte["versatz_dicke"])
+
+    def _ellipsoid_werte_lesen(self):
+        # Alles, was den Ellipsoid festlegt: die Regler und der Versatz
+        return {
+            "radius_faktor": self.slider_radius.value() / 100,
+            "dicken_faktor": self.slider_dicke.value() / 100,
+            "laengen_faktor": self.slider_laenge.value() / 100,
+            "unterschreitung": self.slider_unterschreitung.value() / 100,
+            "pca_radius": float(self.slider_pca_radius.value()),
+            "versatz_breite": self.ellipsoid_versatz[0],
+            "versatz_dicke": self.ellipsoid_versatz[1],
+        }
 
     def weiter_klick(self):
         # "Fertig markiert": beide Fingerspitzen sind gesetzt
@@ -1496,8 +1519,13 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             # Auch beim Einstellen noch abbrechen koennen
             self.navigatecontainer.setVisible(True)
             self.hinweis_label.setText(k.ISOLIEREN_ELLIPSOID_HINWEIS)
+            self.ellipsoid_griffe = EllipsoidGriffe(
+                self.plotter,
+                kontext["hand_ausgerichtet"].length * k.ISOLIEREN_PFEIL_ANTEIL,
+                self._ellipsoid_ziehen_beginnt,
+                self._ellipsoid_gezogen)
             self.aktualisiere_ellipsoid_vorschau()
-            print("Fingertips accepted, now adjust the cutting ellipsoid with the sliders")
+            print("Fingertips accepted, now adjust the cutting ellipsoid with the arrows or the sliders")
 
         self._im_hintergrund(lambda: next(ablauf), fertig, k.ISOLIEREN_ACHSE_HINWEIS)
 
@@ -1581,15 +1609,14 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
 
     def aktualisiere_ellipsoid_vorschau(self):
         if self.aktueller_ellipsoid_actor is not None:
-            self.plotter.remove_actor(self.aktueller_ellipsoid_actor, reset_camera=False)
+            self.plotter.remove_actor(self.aktueller_ellipsoid_actor, reset_camera=False, render=False)
 
-        radius_faktor = self.slider_radius.value() / 100
-        laengen_faktor = self.slider_laenge.value() / 100
-        unterschreitung = self.slider_unterschreitung.value() / 100
-        pca_radius = float(self.slider_pca_radius.value())
-        self.label_radius.setText(f"Breite: {radius_faktor:.2f}")
-        self.label_laenge.setText(f"Länge: {laengen_faktor:.2f}")
-        self.label_unterschreitung.setText(f"Unterschreitung: {unterschreitung:.2f}")
+        werte = self._ellipsoid_werte_lesen()
+        pca_radius = werte.pop("pca_radius")
+        self.label_radius.setText(f"Breite: {werte['radius_faktor']:.2f}")
+        self.label_dicke.setText(f"Dicke: {werte['dicken_faktor']:.2f}")
+        self.label_laenge.setText(f"Länge: {werte['laengen_faktor']:.2f}")
+        self.label_unterschreitung.setText(f"Unterschreitung: {werte['unterschreitung']:.2f}")
 
         if pca_radius != self.ellipsoid_kontext.get("pca_radius"):
             #Der Kantengraph kommt fertig aus der Pipeline, die Neuberechnung
@@ -1611,23 +1638,79 @@ class HauptFenster(UI_Aufbau_Mixin, QMainWindow):
             f"({len(self.ellipsoid_kontext['verwendete_vertices'])} Punkte)"
         )
 
-        ellipsoid = erstelle_schnitt_ellipsoid(
+        # Die Geometrie wird gemerkt, die Pfeile und das Ziehen brauchen
+        # Mitte, Achsen und die Bezugslaengen fuer die Umrechnung mm -> Faktor
+        self._ellipsoid_geometrie = ellipsoid_geometrie(
             self.ellipsoid_kontext["avg_point_of_hurt_finger"],
             self.ellipsoid_kontext["normale"],
             self.ellipsoid_kontext["verwendete_vertices"],
             self.ellipsoid_kontext["tiefster_punkt"],
-            radius_faktor=radius_faktor, laengen_faktor=laengen_faktor, unterschreitung=unterschreitung,
+            **werte,
         )
-        self.aktueller_ellipsoid_actor = self.plotter.add_mesh(ellipsoid, color="darkcyan", opacity=0.3)
+        self.aktueller_ellipsoid_actor = self.plotter.add_mesh(
+            ellipsoid_mesh(self._ellipsoid_geometrie), color="darkcyan", opacity=0.3,
+            pickable=False, render=False)
+        if self.ellipsoid_griffe is not None:
+            self.ellipsoid_griffe.zeige(self._ellipsoid_geometrie)
         self.plotter.render()
 
+    def _ellipsoid_ziehen_beginnt(self):
+        # Klick auf einen Pfeil oder mit der Feststelltaste. Gezogen wird
+        # immer ab diesem Stand, sonst summieren sich die Rundungen der
+        # Regler (Schritte von 0.01) bei jeder Mausbewegung auf.
+        self._ellipsoid_ziehen_start = (self._ellipsoid_werte_lesen(), self._ellipsoid_geometrie)
+
+    def _ellipsoid_gezogen(self, griff, delta):
+        # delta kommt von EllipsoidGriffe: mm entlang des Pfeils, beim
+        # Verschieben ein Vektor in mm. Hier wird daraus wieder ein Reglerwert.
+        werte, geometrie = self._ellipsoid_ziehen_start
+        halbachsen = geometrie["halbachsen"]
+        achsen = geometrie["achsen"]
+        radius_original = geometrie["radius_original"]
+        original_laenge = geometrie["original_laenge"]
+
+        if griff == "laenge":
+            # Die Unterkante bleibt stehen, die Spitze wandert also um die
+            # DOPPELTE Aenderung der Halbachse. Mit dem halben Mausweg bleibt
+            # der Pfeil unter der Maus.
+            neu = [(self.slider_laenge, (halbachsen["laenge"] + delta / 2) / original_laenge)]
+        elif griff == "breite":
+            neu = [(self.slider_radius, (halbachsen["breite"] + delta) / radius_original)]
+        elif griff == "dicke":
+            neu = [(self.slider_dicke, (halbachsen["dicke"] + delta) / radius_original)]
+        else:
+            # Entlang des Fingers ist Verschieben genau die Unterschreitung,
+            # nach oben heisst weniger. Am Reglerende bleibt er dort stehen.
+            # Quer dazu gibt es keinen Regler, das ist der Versatz.
+            neu = [(self.slider_unterschreitung,
+                    werte["unterschreitung"] - np.dot(delta, achsen["laenge"]) / original_laenge)]
+            self.ellipsoid_versatz = (
+                float(werte["versatz_breite"] + np.dot(delta, achsen["breite"]) / radius_original),
+                float(werte["versatz_dicke"] + np.dot(delta, achsen["dicke"]) / radius_original))
+
+        # Regler ohne Signal setzen, sonst rechnet jeder einzeln die Vorschau.
+        # setValue klemmt dabei von selbst auf den Bereich des Reglers.
+        for regler, wert in neu:
+            regler.blockSignals(True)
+            regler.setValue(int(round(wert * 100)))
+            regler.blockSignals(False)
+        self.aktualisiere_ellipsoid_vorschau()
+
+    def ellipsoid_versatz_zuruecksetzen_klick(self):
+        # Nur seitlich zurueck auf die Fingerachse. Entlang des Fingers steckt
+        # die Verschiebung in der Unterschreitung, die hat ihren eigenen Regler.
+        self.ellipsoid_versatz = (0.0, 0.0)
+        self.aktualisiere_ellipsoid_vorschau()
+        print("Ellipsoid moved back onto the finger axis")
+
+    def _ellipsoid_griffe_entfernen(self):
+        if self.ellipsoid_griffe is not None:
+            self.ellipsoid_griffe.entfernen()
+            self.ellipsoid_griffe = None
+
     def ellipsoid_bestaetigen_klick(self):
-        werte = {
-            "radius_faktor": self.slider_radius.value() / 100,
-            "laengen_faktor": self.slider_laenge.value() / 100,
-            "unterschreitung": self.slider_unterschreitung.value() / 100,
-            "pca_radius": float(self.slider_pca_radius.value()),
-        }
+        werte = self._ellipsoid_werte_lesen()
+        self._ellipsoid_griffe_entfernen()
         original_ordner = Path(self.aktueller_ordner)
         self.ellipsoid_einstellen_container.setVisible(False)
         self.navigatecontainer.setVisible(False)

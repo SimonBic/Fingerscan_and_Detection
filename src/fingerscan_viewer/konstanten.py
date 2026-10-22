@@ -293,11 +293,23 @@ ISOLIEREN_MIN_ABSTAND_MM = 5.0
 # Ellipsoid-Werte, wenn fuer den Patienten noch nichts gespeichert ist. Gilt
 # fuer die Automatik und als Startstellung der Regler bei "Selbst justieren".
 ISOLIEREN_STANDARD_WERTE = {
-    "radius_faktor": 2.0,
+    "radius_faktor": 2.0,      # Breite, Richtung Nachbarfinger
+    "dicken_faktor": 2.0,      # Dicke, Handruecken/Handflaeche
     "laengen_faktor": 0.8,
     "unterschreitung": 0.45,
     "pca_radius": PCA_RADIUS,
+    # Seitlich von der Fingerachse weggeschoben, in Vielfachen der Fingerdicke
+    "versatz_breite": 0.0,
+    "versatz_dicke": 0.0,
 }
+# Ziehpfeile am Ellipsoid bei "Selbst justieren". Laenge als Anteil der
+# Scan-Diagonale wie bei den Kugeln, so passt die Groesse bei Hand und Einzelfinger.
+ISOLIEREN_PFEIL_FARBEN = {"laenge": "#D94A4A", "breite": "#3FA34D", "dicke": "#4A90D9"}
+ISOLIEREN_PFEIL_HOVER = "#F2B705"          # Pfeil unter der Maus
+ISOLIEREN_PFEIL_ANTEIL = 0.08
+# Zeigt eine Achse fast genau in die Kamera, ist sie auf dem Bildschirm nur
+# ein paar Pixel lang. Ein Pixel Mausweg waere dann viele mm, der Wert springt.
+ISOLIEREN_PFEIL_MIN_PIXEL = 15
 # Hinweis beim Anklicken der Fingerspitzen, je nachdem wie viele schon gesetzt sind
 ISOLIEREN_HINWEISE = {
     0: "Bitte die Fingerspitze des verletzten Fingers rechtsklicken.",
@@ -312,8 +324,10 @@ ISOLIEREN_ZU_NAH_HINWEIS = ("Der zweite Punkt lag nur {abstand:.1f} mm neben dem
                             "Bitte jetzt die Fingerspitze des benachbarten Fingers rechtsklicken.")
 ISOLIEREN_LADEN_HINWEIS = "Scan wird für das Isolieren vorbereitet, bitte warten ..."
 ISOLIEREN_ACHSE_HINWEIS = "Fingerachse wird berechnet, bitte warten ..."
-ISOLIEREN_ELLIPSOID_HINWEIS = ("Ellipsoid mit den Reglern einstellen: der verletzte Finger soll ganz drin "
-                               "liegen, der Nachbarfinger nicht.\nDann auf 'Bestätigen' klicken.")
+ISOLIEREN_ELLIPSOID_HINWEIS = ("Ellipsoid einstellen: der verletzte Finger soll ganz drin liegen, der "
+                               "Nachbarfinger nicht.\nPfeile ziehen streckt oder staucht, Feststelltaste "
+                               "halten und ziehen verschiebt. Oder die Regler links nutzen.\n"
+                               "Dann auf 'Bestätigen' klicken.")
 ISOLIEREN_RECHNEN_HINWEIS = "Finger wird ausgeschnitten und gespeichert, bitte warten ..."
 ISOLIEREN_FERTIG_HINWEIS = "Finger isoliert und gespeichert: {name}"
 ISOLIEREN_VERWORFEN_HINWEIS = "Neuer Finger verworfen, der bisherige isolierte Finger bleibt."

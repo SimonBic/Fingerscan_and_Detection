@@ -78,7 +78,13 @@ Auf Finger isolieren klicken, dann entweder automatische Einstellungen verwenden
 
 - digitus 5 ist verletzt -> digitus 4 als zweiten Klick
 
-Auf "Fertig markiert" klicken, falls selbst justieren geklickt wurde, mit den Reglern das beste Ergebnis wählen. Die dazugehörigen Parameter werden gespeichert und bei dem nächsten Isolieren desselben Patienten als Werte für automatisches Isolieren verwendet. Dann kurz warten, je nach Prozessorleistung dauert das Isolieren einen Moment (~10 s). Der isolierte Finger kann jetzt mit Klick auf das Finger-Piktogramm geladen werden.
+Auf "Fertig markiert" klicken. Falls selbst justieren geklickt wurde, erscheint ein Ellipsoid um den Finger. Alles, was darin liegt, bleibt beim Isolieren übrig. Der Ellipsoid lässt sich auf zwei Arten einstellen:
+
+- direkt im Viewer: An dem Ellipsoid sitzen drei Pfeile. Rot = Länge, Grün = Breite (Richtung Nachbarfinger), Blau = Dicke (Handrücken/Handfläche). Pfeil mit der linken Maustaste anfassen und ziehen streckt oder staucht den Ellipsoid in diese Richtung. Feststelltaste gedrückt halten und mit der linken Maustaste ziehen verschiebt den ganzen Ellipsoid. Achtung, dabei schaltet die Großschreibung um. "Verschiebung zurücksetzen" setzt ihn wieder mittig auf den Finger.
+
+- mit den Reglern links, die beim Ziehen im Viewer mitlaufen.
+
+Das Ergebnis mit "Bestätigen" übernehmen. Die dazugehörigen Parameter werden gespeichert und bei dem nächsten Isolieren desselben Patienten als Werte für automatisches Isolieren verwendet. Dann kurz warten, je nach Prozessorleistung dauert das Isolieren einen Moment (~10 s). Der isolierte Finger kann jetzt mit Klick auf das Finger-Piktogramm geladen werden.
 
 ---
 
